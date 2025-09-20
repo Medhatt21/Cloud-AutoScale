@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  cloud-simulator:
+    build: .
+    container_name: cloud-scheduler-simulator
+    volumes:
+      - ./data:/app/data
+      - ./experiments:/app/experiments
+      - ./logs:/app/logs
+      - ./notebooks:/app/notebooks
+      - ./configs:/app/configs
+    environment:
+      - PYTHONPATH=/app
+    command: ["tail", "-f", "/dev/null"]  # Keep container running
+    
+  jupyter:
+    build: .
+    container_name: cloud-scheduler-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./data:/app/data
+      - ./experiments:/app/experiments
+      - ./logs:/app/logs
+      - ./notebooks:/app/notebooks
+      - ./configs:/app/configs
+    environment:
+      - PYTHONPATH=/app
+    command: ["uv", "run", "jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+    
+  # MLflow tracking server (optional)
+  mlflow:
+    image: python:3.11-slim
+    container_name: cloud-scheduler-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./experiments/mlruns:/mlruns
+    command: >
+      bash -c "pip install mlflow && 
+               mlflow server --backend-store-uri file:///mlruns --host 0.0.0.0 --port 5000"

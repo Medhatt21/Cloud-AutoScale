@@ -1,0 +1,34 @@
+Business Requirement Document (BRD) – Project Stages
+
+Stage 1: Baseline Implementation (AWS/Azure-style Scheduling & Autoscaling)
+- Objective: Replicate rule-based workload placement, autoscaling, and container scheduling similar to AWS EC2 Auto Scaling and Azure VMSS.
+- Requirements:
+  * Threshold-based scaling (CPU, memory, request load).
+  * Scheduled scaling (time-based policies).
+  * Simple workload placement (spread, compact, fault-domain aware).
+  * Container scheduling policies similar to Kubernetes (affinity, taints/tolerations).
+- Expected Outcome: A simulator capable of running baseline scheduling with reactive and predictive scaling.
+
+Stage 2: ML/DL-based Scheduling
+- Objective: Use ML/DL to forecast workload demand and improve autoscaling & placement.
+- Requirements:
+  * Time-series forecasting (LSTM/Temporal CNN, ARIMA, Prophet) for predictive scaling.
+  * Supervised model for placement classification (which node/VM type to choose).
+  * Integration of ML models into the simulator for decision-making.
+- Expected Outcome: Reduced SLA violations and improved efficiency vs baseline.
+
+Stage 3: Reinforcement Learning Scheduling
+- Objective: Use RL for adaptive scheduling & scaling.
+- Requirements:
+  * Define state, action, reward environment for RL (Gym-based).
+  * Train PPO/DQN agent to optimize SLA compliance, cost, and energy.
+  * Compare performance against baselines.
+- Expected Outcome: RL agent learns policies that outperform static and ML-based methods in dynamic workloads.
+
+Stage 4: Evaluation & Comparison
+- Objective: Compare all approaches quantitatively.
+- Requirements:
+  * Metrics: SLA violation rate, latency, scaling efficiency, energy/cost savings.
+  * Run experiments across Google, Azure, and Alibaba traces.
+  * Stress tests: bursty traffic, node failures, heterogeneous resource scenarios.
+- Expected Outcome: Comprehensive analysis showing trade-offs between rule-based, ML, and RL scheduling.
