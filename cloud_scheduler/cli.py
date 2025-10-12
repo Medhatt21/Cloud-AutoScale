@@ -40,9 +40,14 @@ def simulate(
     console.print("🚀 Starting Cloud Scheduling Simulation", style="bold blue")
     
     # Load configuration
+    full_config_data = None
     if config and config.exists():
         sim_config = load_config(config)
         console.print(f"📋 Loaded configuration from {config}")
+        # Load full config data for autoscaler
+        import yaml
+        with open(config, 'r') as f:
+            full_config_data = yaml.safe_load(f)
     else:
         sim_config = SimulationConfig(simulation_duration=duration)
         console.print("📋 Using default configuration")
@@ -69,7 +74,7 @@ def simulate(
         progress.update(task, description=f"Configured {scheduler} scheduler")
         
         # Setup autoscaler
-        autoscaler_obj = create_autoscaler(autoscaler)
+        autoscaler_obj = create_autoscaler(autoscaler, full_config_data)
         simulator.set_autoscaler(autoscaler_obj)
         progress.update(task, description=f"Configured {autoscaler} autoscaler")
     
@@ -88,7 +93,7 @@ def simulate(
     # Analyze results
     console.print("📊 Analyzing results...")
     analyzer = SimulationAnalyzer()
-    analysis = analyzer.analyze_simulation(metrics_history, simulator.completed_workloads)
+    analysis = analyzer.analyze_simulation(metrics_history, simulator.completed_workloads, simulator.failed_workloads)
     
     # Display summary
     display_results_summary(analysis)
@@ -203,9 +208,24 @@ def create_scheduler(scheduler_type: str):
     return schedulers[scheduler_type]()
 
 
-def create_autoscaler(autoscaler_type: str):
+def create_autoscaler(autoscaler_type: str, config_data: dict = None):
     """Create autoscaler instance."""
-    config = AutoscalingConfig()
+    if config_data and 'autoscaling' in config_data:
+        # Use config from file
+        autoscaling_config = config_data['autoscaling']
+        config = AutoscalingConfig(
+            cpu_scale_up_threshold=autoscaling_config.get('cpu_scale_up_threshold', 0.8),
+            cpu_scale_down_threshold=autoscaling_config.get('cpu_scale_down_threshold', 0.3),
+            memory_scale_up_threshold=autoscaling_config.get('memory_scale_up_threshold', 0.8),
+            memory_scale_down_threshold=autoscaling_config.get('memory_scale_down_threshold', 0.3),
+            scale_up_cooldown=autoscaling_config.get('scale_up_cooldown', 300.0),
+            scale_down_cooldown=autoscaling_config.get('scale_down_cooldown', 600.0),
+            min_hosts=autoscaling_config.get('min_hosts', 1),
+            max_hosts=autoscaling_config.get('max_hosts', 100),
+        )
+    else:
+        # Use default config
+        config = AutoscalingConfig()
     
     autoscalers = {
         "threshold": lambda: ThresholdAutoscaler(config),
@@ -228,14 +248,19 @@ def display_results_summary(analysis: dict) -> None:
     table.add_column("Value", style="green")
     table.add_column("Unit", style="yellow")
     
+    summary = analysis.get('summary', {})
+    sla_metrics = analysis.get('sla_metrics', {})
+    resource_metrics = analysis.get('resource_metrics', {})
+    scaling_metrics = analysis.get('scaling_metrics', {})
+    
     metrics = [
-        ("Total Workloads", f"{analysis.get('total_workloads', 0)}", "count"),
-        ("Completed Workloads", f"{analysis.get('completed_workloads', 0)}", "count"),
-        ("SLA Violation Rate", f"{analysis.get('sla_violation_rate', 0):.2%}", "percentage"),
-        ("Average Queue Time", f"{analysis.get('avg_queue_time', 0):.2f}", "seconds"),
-        ("Average CPU Utilization", f"{analysis.get('avg_cpu_utilization', 0):.2%}", "percentage"),
-        ("Average Memory Utilization", f"{analysis.get('avg_memory_utilization', 0):.2%}", "percentage"),
-        ("Scaling Events", f"{analysis.get('scaling_events', 0)}", "count"),
+        ("Total Workloads", f"{summary.get('total_workloads', 0)}", "count"),
+        ("Completed Workloads", f"{summary.get('completed_workloads', 0)}", "count"),
+        ("SLA Violation Rate", f"{sla_metrics.get('sla_violation_rate', 0):.2%}", "percentage"),
+        ("Average Queue Time", f"{sla_metrics.get('avg_queue_time', 0):.2f}", "seconds"),
+        ("Average CPU Utilization", f"{resource_metrics.get('avg_cpu_utilization', 0):.2%}", "percentage"),
+        ("Average Memory Utilization", f"{resource_metrics.get('avg_memory_utilization', 0):.2%}", "percentage"),
+        ("Scaling Events", f"{scaling_metrics.get('total_scaling_events', 0)}", "count"),
     ]
     
     for metric, value, unit in metrics:

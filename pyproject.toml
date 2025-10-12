@@ -14,21 +14,20 @@ dependencies = [
     "simpy>=4.1.1",
     "numpy>=1.24.0",
     "pandas>=2.0.0",
-    
     # Logging
     "loguru>=0.7.2",
-    
     # Machine Learning (basic)
     "scikit-learn>=1.3.0",
-    
     # Configuration
     "pydantic>=2.5.0",
     "typer>=0.9.0",
-    
     # Utilities
     "tqdm>=4.66.0",
     "rich>=13.7.0",
     "pyyaml>=6.0.0",
+    "matplotlib>=3.9.4",
+    "plotly>=6.3.0",
+    "gcloud>=0.18.3",
 ]
 
 [project.optional-dependencies]

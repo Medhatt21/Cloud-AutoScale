@@ -7,34 +7,34 @@ simulation:
   metrics_collection_interval: 30.0
   host_failure_rate: 0.001
   host_recovery_time: 300.0
-  workload_arrival_rate: 1.0
+  workload_arrival_rate: 2.0
 
 autoscaling:
-  cpu_scale_up_threshold: 0.8
-  cpu_scale_down_threshold: 0.3
-  memory_scale_up_threshold: 0.8
-  memory_scale_down_threshold: 0.3
-  scale_up_cooldown: 300.0
-  scale_down_cooldown: 600.0
-  min_hosts: 5
+  cpu_scale_up_threshold: 0.6
+  cpu_scale_down_threshold: 0.2
+  memory_scale_up_threshold: 0.6
+  memory_scale_down_threshold: 0.2
+  scale_up_cooldown: 120.0
+  scale_down_cooldown: 300.0
+  min_hosts: 3
   max_hosts: 50
 
 infrastructure:
   host_types:
     general_purpose:
-      count: 10
+      count: 5
       cpu: 4
       memory: 16
     cpu_optimized:
-      count: 5
+      count: 3
       cpu: 8
       memory: 16
     memory_optimized:
-      count: 5
+      count: 3
       cpu: 4
       memory: 32
     gpu_enabled:
-      count: 2
+      count: 1
       cpu: 8
       memory: 32
       gpu: 2

@@ -616,11 +616,15 @@ name = "cloud-scheduler-simulator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "gcloud" },
     { name = "loguru" },
+    { name = "matplotlib", version = "3.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "matplotlib", version = "3.10.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "numpy", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas" },
+    { name = "plotly" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -693,6 +697,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.34.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "gcloud", specifier = ">=0.18.3" },
     { name = "google-cloud-bigquery", marker = "extra == 'cloud'", specifier = ">=3.13.0" },
     { name = "gymnasium", marker = "extra == 'all'", specifier = ">=0.29.0" },
     { name = "gymnasium", marker = "extra == 'rl'", specifier = ">=0.29.0" },
@@ -701,11 +706,13 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'jupyter'", specifier = ">=1.0.0" },
     { name = "jupyterlab", marker = "extra == 'jupyter'", specifier = ">=4.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
+    { name = "matplotlib", specifier = ">=3.9.4" },
     { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.7.0" },
     { name = "matplotlib", marker = "extra == 'ml'", specifier = ">=3.7.0" },
     { name = "mlflow", marker = "extra == 'all'", specifier = ">=2.8.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "plotly", specifier = ">=6.3.0" },
     { name = "plotly", marker = "extra == 'all'", specifier = ">=5.17.0" },
     { name = "plotly", marker = "extra == 'ml'", specifier = ">=5.17.0" },
     { name = "polars", marker = "extra == 'all'", specifier = ">=0.20.0" },
@@ -1535,6 +1542,58 @@ wheels = [
 ]
 
 [[package]]
+name = "future"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/b2/4140c69c6a66432916b26158687e821ba631a4c9273c474343badf84d3ba/future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05", size = 1228490 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216", size = 491326 },
+]
+
+[[package]]
+name = "gax-google-logging-v2"
+version = "0.8.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-gax" },
+    { name = "googleapis-common-protos" },
+    { name = "grpc-google-logging-v2" },
+    { name = "oauth2client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/fc/7c36d12946385c7bbf2e74140d2b7836ebc73f9e038b2bbf68a771d95e61/gax-google-logging-v2-0.8.3.tar.gz", hash = "sha256:c36cbb93e070b3b535e9fffff6879efe447e525dff75b62eb4564def515e1a18", size = 13116 }
+
+[[package]]
+name = "gax-google-pubsub-v1"
+version = "0.8.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-gax" },
+    { name = "googleapis-common-protos" },
+    { name = "grpc-google-pubsub-v1" },
+    { name = "oauth2client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7c/b4/183ca4e47f2d2d2f07040be305bf985b0dae7923f7c2df0b261975e46778/gax-google-pubsub-v1-0.8.3.tar.gz", hash = "sha256:943df4aa05cf0302fa1616197d05e29adb62be2c0f55f80d8345439d72471526", size = 13793 }
+
+[[package]]
+name = "gcloud"
+version = "0.18.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "gax-google-logging-v2" },
+    { name = "gax-google-pubsub-v1" },
+    { name = "google-gax" },
+    { name = "googleapis-common-protos" },
+    { name = "grpc-google-logging-v2" },
+    { name = "grpc-google-pubsub-v1" },
+    { name = "grpcio" },
+    { name = "httplib2" },
+    { name = "oauth2client" },
+    { name = "protobuf" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/ab/d0cee58db2d8445c26e6f5db25d9b1f1aa14a3ab30eea8ce77ae808d10ef/gcloud-0.18.3.tar.gz", hash = "sha256:0af2dec59fce20561752f86e42d981c6a255e306a6c5e5d1fa3d358a8857e4fb", size = 454375 }
+
+[[package]]
 name = "gitdb"
 version = "4.0.12"
 source = { registry = "https://pypi.org/simple" }
@@ -1668,6 +1727,19 @@ wheels = [
 ]
 
 [[package]]
+name = "google-gax"
+version = "0.12.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "future" },
+    { name = "grpcio" },
+    { name = "oauth2client" },
+    { name = "ply" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/77/46fd88558e28768b1ce3bbb19c61f0b596f8cafbcc2356f236a6a6fa03ac/google-gax-0.12.5.tar.gz", hash = "sha256:63312a04cb87ca50e857245f05c582b2171807a30e61cef85006b983bf659cb9", size = 27927 }
+
+[[package]]
 name = "google-resumable-media"
 version = "2.7.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1790,6 +1862,28 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/89/48/a5dc74dde38aeb2b15d418cec76ed50e1dd3d620ccda84d8199703248968/greenlet-3.2.4-cp39-cp39-win32.whl", hash = "sha256:65458b409c1ed459ea899e939f0e1cdb14f58dbc803f2f93c5eab5694d32671b", size = 281400 },
     { url = "https://files.pythonhosted.org/packages/e5/44/342c4591db50db1076b8bda86ed0ad59240e3e1da17806a4cf10a6d0e447/greenlet-3.2.4-cp39-cp39-win_amd64.whl", hash = "sha256:d2e685ade4dafd447ede19c31277a224a239a0a1a4eca4e6390efedf20260cfb", size = 298533 },
 ]
+
+[[package]]
+name = "grpc-google-logging-v2"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos" },
+    { name = "grpcio" },
+    { name = "oauth2client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bc/41/898cedce619b553fe3a54d666a62e70119651befe05b22aa55476ac13757/grpc-google-logging-v2-0.8.1.tar.gz", hash = "sha256:4b6b4e603860b134b2cb8732bb4d1f2cec963d553497dcf70b3f5ecc99d7fb4f", size = 14060 }
+
+[[package]]
+name = "grpc-google-pubsub-v1"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "googleapis-common-protos" },
+    { name = "grpcio" },
+    { name = "oauth2client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/98/b77bc4ace41b1804a2c124bda79f05b39e51a5b32904cb8840f61d2fe3c4/grpc-google-pubsub-v1-0.8.1.tar.gz", hash = "sha256:ab5a3a239a9678012cdc00a9b9a8fe8c75fca9a0035da41da3078145e9d967b9", size = 13066 }
 
 [[package]]
 name = "grpcio"
@@ -1970,6 +2064,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784 },
+]
+
+[[package]]
+name = "httplib2"
+version = "0.31.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/77/6653db69c1f7ecfe5e3f9726fdadc981794656fcd7d98c4209fecfea9993/httplib2-0.31.0.tar.gz", hash = "sha256:ac7ab497c50975147d4f7b1ade44becc7df2f8954d42b38b3d69c515f531135c", size = 250759 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/a2/0d269db0f6163be503775dc8b6a6fa15820cc9fdc866f6ba608d86b721f2/httplib2-0.31.0-py3-none-any.whl", hash = "sha256:b9cd78abea9b4e43a7714c6e0f8b6b8561a6fc1e95d5dbd367f5bf0ef35f5d24", size = 91148 },
 ]
 
 [[package]]
@@ -3957,6 +4063,22 @@ wheels = [
 ]
 
 [[package]]
+name = "oauth2client"
+version = "4.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httplib2" },
+    { name = "pyasn1" },
+    { name = "pyasn1-modules" },
+    { name = "rsa" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/7b/17244b1083e8e604bf154cf9b716aecd6388acd656dd01893d0d244c94d9/oauth2client-4.1.3.tar.gz", hash = "sha256:d486741e451287f69568a4d26d70d9acd73a2bbfa275746c535b4209891cccc6", size = 155910 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/a9/4f25a14d23f0786b64875b91784607c2277eff25d48f915e39ff0cff505a/oauth2client-4.1.3-py2.py3-none-any.whl", hash = "sha256:b8a81cc5d60e2d364f0b1b98f958dbd472887acaf1a5b05e21c28c31a2d6d3ac", size = 98206 },
+]
+
+[[package]]
 name = "openapi-core"
 version = "0.19.5"
 source = { registry = "https://pypi.org/simple" }
@@ -4377,6 +4499,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538 },
 ]
+
+[[package]]
+name = "ply"
+version = "3.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/e0/430fcdb6b3ef1ae534d231397bee7e9304be14a47a267e82ebcb3323d0b5/ply-3.8.tar.gz", hash = "sha256:e7d1bdff026beb159c9942f7a17e102c375638d9478a7ecd4cc0c76afd8de0b8", size = 157286 }
 
 [[package]]
 name = "polars"

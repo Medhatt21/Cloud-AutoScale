@@ -1,6 +1,7 @@
 """Main cloud simulator using SimPy."""
 
 import simpy
+import random
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass
 import time
@@ -79,6 +80,7 @@ class CloudSimulator:
         
         # Workload management
         self.workload_generator = WorkloadGenerator(config.random_seed)
+        self.random = random.Random(config.random_seed)  # Dedicated random generator for simulator
         self.workload_queue: List[Workload] = []
         self.running_workloads: Dict[str, Workload] = {}
         self.completed_workloads: List[Workload] = []
@@ -91,6 +93,10 @@ class CloudSimulator:
         # Metrics collection
         self.metrics_history: List[SimulationMetrics] = []
         self.current_metrics = SimulationMetrics(timestamp=0.0)
+        
+        # Scaling event counters
+        self.scale_up_events: int = 0
+        self.scale_down_events: int = 0
         
         # Event subscriptions
         self._setup_event_handlers()
@@ -136,6 +142,7 @@ class CloudSimulator:
         self.env.process(self._workload_arrival_process())
         self.env.process(self._metrics_collection_process())
         self.env.process(self._failure_simulation_process())
+        self.env.process(self._event_processing_process())  # Process scheduled events
         
         if self.config.enable_autoscaling and self.autoscaler:
             self.env.process(self._autoscaling_process())
@@ -156,7 +163,7 @@ class CloudSimulator:
         """Process for generating workload arrivals."""
         while True:
             # Generate next workload
-            workload_type = self.workload_generator.patterns.keys().__iter__().__next__()
+            workload_type = next(iter(self.workload_generator.patterns.keys()))
             workload = self.workload_generator.generate_workload(
                 workload_type, self.env.now
             )
@@ -201,7 +208,7 @@ class CloudSimulator:
                     failure_prob = (self.config.host_failure_rate * 
                                   self.config.time_step / 3600.0)  # per hour to per second
                     
-                    if self.workload_generator.random.random() < failure_prob:
+                    if self.random.random() < failure_prob:
                         event = SimulationEvent(
                             timestamp=self.env.now,
                             event_type=EventType.HOST_FAILURE,
@@ -225,6 +232,26 @@ class CloudSimulator:
                 self.event_bus.publish(event)
             
             yield self.env.timeout(60.0)  # Check every minute
+    
+    def _event_processing_process(self):
+        """Process scheduled events from the event bus."""
+        while True:
+            # Check for events that should be processed now
+            current_time = self.env.now
+            events_to_process = []
+            
+            # Find events that are due
+            for event in self.event_bus.events[:]:  # Copy to avoid modification during iteration
+                if event.timestamp <= current_time:
+                    events_to_process.append(event)
+                    self.event_bus.events.remove(event)
+            
+            # Process due events
+            for event in events_to_process:
+                self.event_bus.publish(event)
+            
+            # Wait a short time before checking again
+            yield self.env.timeout(0.1)  # Check every 0.1 seconds
     
     def _handle_workload_arrival(self, event: SimulationEvent) -> None:
         """Handle workload arrival event."""
@@ -328,7 +355,95 @@ class CloudSimulator:
             
             if scaling_decision:
                 logger.info(f"Autoscaling decision: {scaling_decision}")
-                # Implementation depends on specific autoscaler
+                self._execute_scaling_decision(scaling_decision)
+    
+    def _execute_scaling_decision(self, decision) -> None:
+        """Execute a scaling decision by adding or removing hosts."""
+        from .events import EventType
+        
+        if decision.action.value == "scale_up":
+            # Add new hosts
+            for i in range(decision.count):
+                new_host = self._create_new_host()
+                self.hosts[new_host.host_id] = new_host
+                self.scale_up_events += 1
+                logger.info(f"Added new host {new_host.host_id} - {decision.reason}")
+                
+                # Publish scale-up event
+                scale_event = SimulationEvent(
+                    timestamp=self.env.now,
+                    event_type=EventType.SCALE_UP,
+                    resource_id=new_host.host_id,
+                    data={"host": new_host, "reason": decision.reason}
+                )
+                self.event_bus.publish(scale_event)
+                
+        elif decision.action.value == "scale_down":
+            # Remove hosts (find least utilized ones)
+            hosts_to_remove = self._find_hosts_to_remove(decision.count)
+            for host in hosts_to_remove:
+                if len(self.hosts) > self.autoscaler.config.min_hosts:  # Respect minimum hosts
+                    # Move workloads from this host to others
+                    self._migrate_workloads_from_host(host)
+                    
+                    # Remove the host
+                    del self.hosts[host.host_id]
+                    self.scale_down_events += 1
+                    logger.info(f"Removed host {host.host_id} - {decision.reason}")
+                    
+                    # Publish scale-down event
+                    scale_event = SimulationEvent(
+                        timestamp=self.env.now,
+                        event_type=EventType.SCALE_DOWN,
+                        resource_id=host.host_id,
+                        data={"host": host, "reason": decision.reason}
+                    )
+                    self.event_bus.publish(scale_event)
+    
+    def _create_new_host(self) -> Host:
+        """Create a new host with general purpose specs."""
+        from .resources import ResourceSpecs
+        
+        host_id = f"host_{len(self.hosts) + 1:06d}"
+        specs = ResourceSpecs(cpu_cores=4, memory_gb=16.0, disk_gb=100.0, network_gbps=1.0)
+        return Host(host_id, specs)
+    
+    def _find_hosts_to_remove(self, count: int) -> List[Host]:
+        """Find hosts to remove based on utilization (least utilized first)."""
+        available_hosts = [h for h in self.hosts.values() if h.state.value == "available"]
+        
+        # Sort by utilization (least utilized first)
+        available_hosts.sort(key=lambda h: h.get_utilization()['cpu'] + h.get_utilization()['memory'])
+        
+        return available_hosts[:count]
+    
+    def _migrate_workloads_from_host(self, host: Host) -> None:
+        """Migrate workloads from a host that's being removed."""
+        workloads_to_migrate = []
+        for workload in self.running_workloads.values():
+            if workload.assigned_host_id == host.host_id:
+                workloads_to_migrate.append(workload)
+        
+        for workload in workloads_to_migrate:
+            # Find a suitable alternative host
+            alternative_host = self._find_alternative_host(workload)
+            if alternative_host:
+                # Migrate the workload
+                workload.assigned_host_id = alternative_host.host_id
+                logger.debug(f"Migrated workload {workload.workload_id} from {host.host_id} to {alternative_host.host_id}")
+            else:
+                # No alternative host available, fail the workload
+                logger.warning(f"No alternative host found for workload {workload.workload_id}, marking as failed")
+                self.failed_workloads[workload.workload_id] = workload
+                del self.running_workloads[workload.workload_id]
+    
+    def _find_alternative_host(self, workload: Workload) -> Optional[Host]:
+        """Find an alternative host for a workload."""
+        for host in self.hosts.values():
+            if (host.state.value == "available" and 
+                host.can_accommodate(workload.resource_requirements)):
+                return host
+        return None
     
     def _start_workload_execution(self, workload: Workload) -> None:
         """Start executing a workload."""
@@ -377,6 +492,10 @@ class CloudSimulator:
             mem_utils = [host.get_utilization().memory_utilization for host in self.hosts.values()]
             metrics.avg_cpu_utilization = sum(cpu_utils) / len(cpu_utils)
             metrics.avg_memory_utilization = sum(mem_utils) / len(mem_utils)
+        
+        # Scaling metrics (cumulative counts)
+        metrics.scale_up_events = self.scale_up_events
+        metrics.scale_down_events = self.scale_down_events
         
         self.current_metrics = metrics
         self.metrics_history.append(metrics)

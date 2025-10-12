@@ -128,8 +128,10 @@ class MetricsCalculator:
                 'scaling_efficiency': 0.0,
             }
         
-        total_scale_up = sum(m.scale_up_events for m in metrics_history)
-        total_scale_down = sum(m.scale_down_events for m in metrics_history)
+        # Get scaling events from the last metrics point (cumulative counts)
+        last_metrics = metrics_history[-1]
+        total_scale_up = last_metrics.scale_up_events
+        total_scale_down = last_metrics.scale_down_events
         total_scaling = total_scale_up + total_scale_down
         
         # Scaling efficiency: ratio of useful scaling actions
@@ -243,11 +245,12 @@ class SimulationAnalyzer:
         )
         
         # Combine all metrics
+        failed_count = len(failed_workloads) if failed_workloads else 0
         analysis = {
             'summary': {
-                'total_workloads': len(completed_workloads) + len(failed_workloads),
+                'total_workloads': len(completed_workloads) + failed_count,
                 'completed_workloads': len(completed_workloads),
-                'failed_workloads': len(failed_workloads),
+                'failed_workloads': failed_count,
                 'simulation_duration': metrics_history[-1].timestamp if metrics_history else 0.0,
             },
             'sla_metrics': sla_metrics,

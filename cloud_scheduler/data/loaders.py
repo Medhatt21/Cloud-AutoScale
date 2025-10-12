@@ -70,16 +70,21 @@ class GoogleTraceLoader(CloudTraceLoader):
         return len(missing_files) == 0
     
     def load_workloads(self, limit: Optional[int] = None) -> List[Workload]:
-        """Load workloads from Google trace instance events."""
+        """Load workloads from Google trace data (processed JSON or raw CSV)."""
         self.logger.info(f"Loading Google trace workloads (limit: {limit})")
         
-        # Try to load instance events
+        # First try to load processed JSON format (from our integration script)
+        workloads_json = self.data_path / "workloads.json"
+        if workloads_json.exists():
+            return self._load_processed_workloads(workloads_json, limit)
+        
+        # Fallback to raw CSV format
         instance_events_file = self.data_path / "instance_events.csv"
         if not instance_events_file.exists():
             instance_events_file = self.data_path / "instance_events.csv.gz"
         
         if not instance_events_file.exists():
-            self.logger.error("Instance events file not found")
+            self.logger.error("Neither workloads.json nor instance_events.csv found")
             return []
         
         try:
@@ -155,6 +160,108 @@ class GoogleTraceLoader(CloudTraceLoader):
         except Exception as e:
             self.logger.error(f"Error loading Google trace usage: {e}")
             return pd.DataFrame()
+    
+    def _load_processed_workloads(self, workloads_file: Path, limit: Optional[int] = None) -> List[Workload]:
+        """Load workloads from processed JSON format."""
+        import json
+        
+        self.logger.info(f"Loading processed workloads from {workloads_file}")
+        
+        try:
+            with open(workloads_file, 'r') as f:
+                workload_data = json.load(f)
+            
+            if limit:
+                workload_data = workload_data[:limit]
+            
+            workloads = []
+            for i, data in enumerate(workload_data):
+                # Map workload types
+                workload_type_map = {
+                    'batch': WorkloadType.BATCH,
+                    'best_effort_batch': WorkloadType.BATCH,
+                    'mid_tier': WorkloadType.SERVICE,
+                    'production': WorkloadType.SERVICE,
+                    'monitoring': WorkloadType.INTERACTIVE
+                }
+                
+                workload_type = workload_type_map.get(
+                    data.get('workload_type', 'batch'), 
+                    WorkloadType.BATCH
+                )
+                
+                # Create resource specifications
+                resource_specs = ResourceSpecs(
+                    cpu_cores=max(1, int(data.get('cpu_request', 1))),
+                    memory_gb=max(0.5, float(data.get('memory_request', 1))),
+                    disk_gb=20.0,
+                    network_gbps=1.0,
+                    gpu_count=0,
+                    gpu_memory_gb=0.0
+                )
+                
+                # Map priority
+                priority = self._infer_priority(data.get('priority', 100))
+                
+                # Create workload
+                workload = Workload(
+                    workload_id=data.get('id', f'workload_{i}'),
+                    workload_type=workload_type,
+                    arrival_time=float(data.get('arrival_time', i * 10)),
+                    resource_specs=resource_specs,
+                    duration=float(data.get('estimated_duration', 300)),
+                    priority=priority,
+                    user_id=str(data.get('user', 'unknown')),
+                    constraints={}
+                )
+                
+                workloads.append(workload)
+            
+            self.logger.info(f"Loaded {len(workloads)} processed workloads")
+            return workloads
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load processed workloads: {e}")
+            return []
+    
+    def load_machines(self) -> List[Dict]:
+        """Load machine configurations from processed JSON format."""
+        machines_json = self.data_path / "machines.json"
+        if machines_json.exists():
+            return self._load_processed_machines(machines_json)
+        
+        self.logger.warning("No machines.json found")
+        return []
+    
+    def _load_processed_machines(self, machines_file: Path) -> List[Dict]:
+        """Load machines from processed JSON format."""
+        import json
+        
+        self.logger.info(f"Loading processed machines from {machines_file}")
+        
+        try:
+            with open(machines_file, 'r') as f:
+                machines_data = json.load(f)
+            
+            machines = []
+            for data in machines_data:
+                machine = {
+                    'id': data.get('id', f"host_{len(machines)}"),
+                    'cpu_cores': int(data.get('cpu_cores', 4)),
+                    'memory_gb': float(data.get('memory_gb', 8)),
+                    'zone': data.get('zone', 'us-east-1a'),
+                    'instance_type': data.get('instance_type', 't3.medium'),
+                    'platform_id': data.get('platform_id', 'unknown'),
+                    'switch_id': data.get('switch_id', 'unknown')
+                }
+                machines.append(machine)
+            
+            self.logger.info(f"Loaded {len(machines)} machine configurations")
+            return machines
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load processed machines: {e}")
+            return []
     
     def _infer_workload_type(self, cpu_request: float, memory_request: float) -> WorkloadType:
         """Infer workload type from resource pattern."""
