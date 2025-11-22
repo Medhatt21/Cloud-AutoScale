@@ -38,13 +38,20 @@ This project implements a **baseline threshold-based autoscaling simulator** tha
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- **Python 3.13+** is required
+- [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
+
 ### Installation
 
 ```bash
-# Install dependencies
+# With uv (recommended) - will automatically use Python 3.13
 uv sync
 
-# Or with pip
+# Or manually create venv with Python 3.13 and use pip
+python3.13 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
 ```
 

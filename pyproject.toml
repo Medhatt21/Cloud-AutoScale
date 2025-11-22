@@ -6,16 +6,18 @@ authors = [
     {name = "Medhata Bouzeid", email = "medhata@example.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 license = {text = "MIT"}
 
 dependencies = [
     # Core dependencies
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
+    "numpy>=2.1.0",
+    "pandas>=2.2.0",
     "pyyaml>=6.0.0",
-    "matplotlib>=3.7.0",
+    "matplotlib>=3.9.0",
     "tqdm>=4.67.1",
+    "orjson>=3.11.4",
+    "polars>=1.35.2",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +41,7 @@ packages = ["cloud_autoscale"]
 
 [tool.black]
 line-length = 100
-target-version = ['py39']
+target-version = ['py313']
 include = '\.pyi?$'
 
 [tool.isort]
