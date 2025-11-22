@@ -1,33 +1,20 @@
 [project]
-name = "cloud-scheduler-simulator"
-version = "0.1.0"
-description = "Cloud Scheduling and Autoscaling Simulator with ML/RL"
+name = "cloud-autoscale"
+version = "1.0.0"
+description = "Cloud Autoscaling Simulator - Master's Project"
 authors = [
-    {name = "Cloud Project Team", email = "team@example.com"}
+    {name = "Medhata Bouzeid", email = "medhata@example.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 
 dependencies = [
-    # Core simulation
-    "simpy>=4.1.1",
+    # Core dependencies
     "numpy>=1.24.0",
     "pandas>=2.0.0",
-    # Logging
-    "loguru>=0.7.2",
-    # Machine Learning (basic)
-    "scikit-learn>=1.3.0",
-    # Configuration
-    "pydantic>=2.5.0",
-    "typer>=0.9.0",
-    # Utilities
-    "tqdm>=4.66.0",
-    "rich>=13.7.0",
     "pyyaml>=6.0.0",
-    "matplotlib>=3.9.4",
-    "plotly>=6.3.0",
-    "gcloud>=0.18.3",
+    "matplotlib>=3.7.0",
 ]
 
 [project.optional-dependencies]
@@ -39,79 +26,22 @@ dev = [
     "flake8>=6.0.0",
 ]
 
-ml = [
-    # Machine Learning
-    "torch>=2.1.0",
-    "prophet>=1.1.4",
-    "statsmodels>=0.14.0",
-    
-    # Data processing
-    "polars>=0.20.0",
-    "pyarrow>=14.0.0",
-    
-    # Visualization
-    "matplotlib>=3.7.0",
-    "plotly>=5.17.0",
-    "seaborn>=0.13.0",
-]
-
-rl = [
-    # Reinforcement Learning
-    "stable-baselines3[extra]>=2.2.1",
-    "gymnasium>=0.29.0",
-    "sb3-contrib>=2.2.1",
-]
-
-jupyter = [
-    "jupyter>=1.0.0",
-    "jupyterlab>=4.0.0",
-    "ipywidgets>=8.1.0",
-]
-
-cloud = [
-    "google-cloud-bigquery>=3.13.0",
-    "azure-storage-blob>=12.19.0",
-    "boto3>=1.34.0",
-]
-
-all = [
-    "torch>=2.1.0",
-    "prophet>=1.1.4", 
-    "statsmodels>=0.14.0",
-    "polars>=0.20.0",
-    "pyarrow>=14.0.0",
-    "matplotlib>=3.7.0",
-    "plotly>=5.17.0",
-    "seaborn>=0.13.0",
-    "stable-baselines3[extra]>=2.2.1",
-    "gymnasium>=0.29.0",
-    "sb3-contrib>=2.2.1",
-    "wandb>=0.16.0",
-    "mlflow>=2.8.0",
-]
-
 [project.scripts]
-cloud-sim = "cloud_scheduler.cli:main"
+cloud-autoscale = "cloud_autoscale.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cloud_scheduler"]
+packages = ["cloud_autoscale"]
 
 [tool.black]
-line-length = 88
+line-length = 100
 target-version = ['py39']
 include = '\.pyi?$'
 
 [tool.isort]
 profile = "black"
 multi_line_output = 3
-line_length = 88
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+line_length = 100

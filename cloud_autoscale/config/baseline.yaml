@@ -1,0 +1,52 @@
+# Cloud AutoScale - Baseline Configuration
+
+# Mode: "synthetic" or "gcp_2019"
+mode: "synthetic"
+
+# Data configuration
+data:
+  # Path to data files (for gcp_2019 mode)
+  path: "data/raw/google"
+  
+  # Synthetic pattern: "periodic", "bursty", "random_walk", "spike"
+  synthetic_pattern: "periodic"
+  
+  # Duration of simulation in minutes
+  duration_minutes: 60
+
+# Simulation configuration
+simulation:
+  # Time step size in minutes
+  step_minutes: 5
+  
+  # Minimum number of machines
+  min_machines: 1
+  
+  # Maximum number of machines
+  max_machines: 20
+  
+  # Capacity per machine (in units)
+  machine_capacity: 10
+  
+  # Cost per machine per hour (in dollars)
+  cost_per_machine_per_hour: 0.1
+
+# Autoscaler configuration
+autoscaler:
+  # Scale up when utilization exceeds this threshold
+  upper_threshold: 0.7
+  
+  # Scale down when utilization falls below this threshold
+  lower_threshold: 0.3
+  
+  # Maximum machines to add/remove per scaling action
+  max_scale_per_step: 1
+  
+  # Cooldown period in time steps (to prevent thrashing)
+  cooldown_steps: 2
+
+# Output configuration
+output:
+  # Directory to save results
+  directory: "results"
+

@@ -1,125 +1,209 @@
-# Cloud Scheduling and Autoscaling Simulator
+# Cloud AutoScale
 
-A comprehensive cloud scheduling and autoscaling simulator implementing baseline, ML/DL, and reinforcement learning approaches for workload management.
+A clean, minimal baseline autoscaling simulator for cloud infrastructure - Master's Project.
 
-## Project Overview
+## 🎯 Project Overview
 
-This project implements a multi-stage cloud scheduling simulator:
+This project implements a **baseline threshold-based autoscaling simulator** that:
 
-1. **Stage 1**: Baseline Implementation (AWS/Azure-style scheduling & autoscaling)
-2. **Stage 2**: ML/DL-based Scheduling with predictive models
-3. **Stage 3**: Reinforcement Learning Scheduling
-4. **Stage 4**: Evaluation & Comparison
+- ✅ Loads synthetic demand patterns OR real GCP 2019 trace data
+- ✅ Runs discrete-time simulation with configurable autoscaling policies
+- ✅ Generates comprehensive visualizations and metrics
+- ✅ Focuses ONLY on what's needed for academic evaluation
 
-## Setup
+## 📦 Features
 
-This project uses [uv](https://github.com/astral-sh/uv) for fast Python package management.
+### Data Loading
+- **Synthetic Mode**: Generate demand patterns (periodic, bursty, random walk, spike)
+- **GCP 2019 Mode**: Load real Google Cloud Platform 2019 trace data
 
-### Prerequisites
+### Simulation
+- Simple discrete-time loop over demand timeline
+- Threshold-based autoscaling (scale up/down based on utilization)
+- Configurable thresholds, cooldown periods, and capacity limits
 
-- Python 3.9+
-- uv package manager
-- Docker (optional, for reproducible environments)
+### Metrics
+- **SLA Violations**: Track when demand exceeds capacity
+- **Utilization**: Average, percentiles (P50, P95, P99)
+- **Scaling Events**: Count and visualize scale up/down actions
+- **Cost**: Simple cost model based on machine hours
+- **Stability**: Number of scaling events (lower is better)
+
+### Visualizations
+- Demand vs Capacity over time
+- Utilization with threshold lines
+- Machine count with scaling events
+- SLA violations timeline
+- Metrics summary dashboard
+
+## 🚀 Quick Start
 
 ### Installation
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
 # Install dependencies
 uv sync
 
-# Install with development dependencies
-uv sync --extra dev
-
-# Install with Jupyter support
-uv sync --extra jupyter
-
-# Install with cloud data access
-uv sync --extra cloud
+# Or with pip
+pip install -e .
 ```
 
-### Development Setup
+### Run Simulation
 
 ```bash
-# Install pre-commit hooks
-uv run pre-commit install
+# Run with synthetic data (default)
+uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
 
-# Run tests
-uv run pytest
+# Run with different patterns
+uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml --pattern bursty
+uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml --pattern spike
 
-# Format code
-uv run black .
-uv run isort .
-
-# Type checking
-uv run mypy cloud_scheduler/
+# Run with GCP 2019 data (after downloading data)
+# First, update the config to use mode: "gcp_2019" and set data.path
+uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
 ```
 
-## Usage
+## 📁 Project Structure
 
-### Running the Simulator
+```
+cloud_autoscale/
+├── data/
+│   └── loaders/
+│       ├── synthetic_loader.py    # Generate synthetic demand patterns
+│       └── gcp2019_loader.py      # Load GCP 2019 trace data
+├── simulation/
+│   ├── simulator.py               # Main discrete-time simulator
+│   ├── autoscaler_baseline.py    # Threshold-based autoscaler
+│   └── metrics.py                 # Metrics calculation
+├── visualization/
+│   └── plots.py                   # All visualization functions
+├── config/
+│   ├── config.py                  # Configuration management
+│   └── baseline.yaml              # Default configuration
+└── cli/
+    └── main.py                    # Command-line interface
+```
+
+## ⚙️ Configuration
+
+Edit `cloud_autoscale/config/baseline.yaml`:
+
+```yaml
+# Mode: "synthetic" or "gcp_2019"
+mode: "synthetic"
+
+data:
+  path: "data/raw/google"              # For GCP mode
+  synthetic_pattern: "periodic"        # periodic, bursty, random_walk, spike
+  duration_minutes: 60
+
+simulation:
+  step_minutes: 5                      # Time step size
+  min_machines: 1
+  max_machines: 20
+  machine_capacity: 10                 # Units per machine
+  cost_per_machine_per_hour: 0.1
+
+autoscaler:
+  upper_threshold: 0.7                 # Scale up threshold
+  lower_threshold: 0.3                 # Scale down threshold
+  max_scale_per_step: 1
+  cooldown_steps: 2                    # Prevent thrashing
+
+output:
+  directory: "results"
+```
+
+## 📊 Output
+
+Each simulation run creates a timestamped directory in `results/` containing:
+
+- `timeline.csv` - Full simulation timeline data
+- `metrics.json` - Calculated metrics
+- `config.yaml` - Configuration used for the run
+- `plots/` - Directory with all visualizations:
+  - `demand_vs_capacity.png`
+  - `utilization.png`
+  - `machines.png`
+  - `violations.png`
+  - `metrics_summary.png`
+
+## 🔬 Using GCP 2019 Data
+
+### Download Data
+
+Use the external scripts provided to download GCP 2019 trace data:
 
 ```bash
-# Basic simulation with baseline scheduling
-uv run cloud-sim simulate --config configs/baseline.yaml
-
-# ML-based scheduling
-uv run cloud-sim simulate --config configs/ml_scheduling.yaml
-
-# RL-based scheduling
-uv run cloud-sim simulate --config configs/rl_scheduling.yaml
-
-# Evaluation and comparison
-uv run cloud-sim evaluate --methods baseline,ml,rl
+# Download using the provided scripts
+# (scripts should be in scripts/ directory)
+bash scripts/download_google_traces.sh
 ```
 
-### Data Preparation
+### Configure for GCP Mode
+
+Update `cloud_autoscale/config/baseline.yaml`:
+
+```yaml
+mode: "gcp_2019"
+data:
+  path: "data/raw/google"  # Path to downloaded data
+  duration_minutes: 60
+```
+
+### Run
 
 ```bash
-# Download and preprocess Google Cluster Traces
-uv run cloud-sim data prepare --dataset google --output data/processed/
-
-# Preprocess Azure Public Dataset
-uv run cloud-sim data prepare --dataset azure --output data/processed/
+uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
 ```
 
-## Project Structure
+## 📈 Metrics Explained
 
-```
-cloud-project/
-├── cloud_scheduler/           # Main package
-│   ├── core/                 # Core simulation engine
-│   ├── scheduling/           # Scheduling algorithms
-│   ├── ml/                   # ML/DL models
-│   ├── rl/                   # Reinforcement learning
-│   ├── data/                 # Data processing
-│   ├── evaluation/           # Evaluation framework
-│   └── utils/                # Utilities
-├── configs/                  # Configuration files
-├── data/                     # Data storage
-├── experiments/              # Experiment results
-├── notebooks/                # Jupyter notebooks
-├── docker/                   # Docker configurations
-└── tests/                    # Test suite
-```
+### SLA Metrics
+- **Violation Rate**: Percentage of time steps where demand exceeded capacity
+- **Total Violations**: Count of violation events
 
-## Datasets
+### Utilization Metrics
+- **Average**: Mean utilization across all time steps
+- **Percentiles**: P50, P95, P99 utilization values
 
-- Google Cluster Trace 2019 (BigQuery)
-- Azure Public Dataset V2 (2019)
-- Alibaba Cluster Trace 2018 (optional)
+### Scaling Metrics
+- **Scale Up/Down Events**: Count of each type of scaling action
+- **Stability Score**: Total scaling events (lower = more stable)
 
-## Technologies
+### Cost Metrics
+- **Total Cost**: Cumulative cost based on machine hours
+- **Cost per Step**: Average cost per time step
 
-- **Simulation**: SimPy
-- **ML/DL**: PyTorch, scikit-learn, Prophet, ARIMA
-- **RL**: Stable-Baselines3, Gymnasium
-- **Data**: Polars, Pandas, PyArrow
-- **Visualization**: Matplotlib, Plotly, Seaborn
-- **Experiment Tracking**: Weights & Biases, MLflow
+### Overall Performance
+- **Efficiency Score**: Composite score (0-100) balancing utilization, violations, and stability
 
-## License
+## 🧹 What Was Removed
+
+This refactored version removed:
+- ❌ Unused ML pipelines (Prophet, ARIMA, LSTM)
+- ❌ Unused RL environments (Stable Baselines)
+- ❌ Azure and Alibaba data loaders
+- ❌ Complex SimPy-based event simulation
+- ❌ Over-engineered abstractions
+- ❌ Placeholder classes and unused features
+- ❌ Multiple scheduling algorithms (kept only baseline)
+- ❌ Excessive boilerplate and defaults
+
+## 🎓 Academic Use
+
+This simulator is designed for academic evaluation and comparison of autoscaling policies. It provides:
+
+1. **Reproducible results** with configurable random seeds
+2. **Clear metrics** for quantitative comparison
+3. **Visual outputs** for qualitative analysis
+4. **Simple codebase** suitable for academic submission
+5. **Extensible design** for adding new policies
+
+## 📝 License
 
 MIT License
+
+## 👤 Author
+
+Medhata Bouzeid - Master's Project
