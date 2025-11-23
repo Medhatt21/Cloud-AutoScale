@@ -441,3 +441,195 @@ def plot_metrics_summary(
     
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+
+def plot_forecast_comparison(
+    run_dir: Path,
+    output_path: Optional[Path] = None
+) -> None:
+    """
+    Plot actual demand vs ML predictions from modeling results.
+    
+    This visualization helps compare baseline (reactive) vs proactive (ML-driven)
+    autoscaling performance by showing how well the ML model forecasts demand.
+    
+    Args:
+        run_dir: Path to simulation run directory containing modeling/predictions.csv
+        output_path: Optional path to save plot (defaults to run_dir/plots/forecast_comparison.png)
+    """
+    # Load predictions
+    predictions_path = run_dir / "modeling" / "predictions.csv"
+    
+    if not predictions_path.exists():
+        print(f"⚠️  Predictions file not found: {predictions_path}")
+        print("   Run the modeling notebook first to generate predictions.")
+        return
+    
+    predictions = pd.read_csv(predictions_path)
+    
+    # Set default output path
+    if output_path is None:
+        output_path = run_dir / "plots" / "forecast_comparison.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create figure
+    fig, axes = plt.subplots(2, 1, figsize=(16, 10))
+    
+    # Plot 1: Full time series comparison
+    window = min(1000, len(predictions))
+    times = predictions['time'].values[:window]
+    actual = predictions['actual'].values[:window]
+    lgb_pred = predictions['lgb_pred'].values[:window]
+    
+    axes[0].plot(times, actual, label='Actual Demand', linewidth=2, color='black', alpha=0.8)
+    axes[0].plot(times, lgb_pred, label='LightGBM Forecast', linewidth=2, 
+                linestyle='--', color='#9B59B6', alpha=0.8)
+    axes[0].fill_between(times, actual, lgb_pred, alpha=0.2, color='orange')
+    axes[0].set_xlabel('Time (minutes)', fontweight='bold', fontsize=12)
+    axes[0].set_ylabel('CPU Demand', fontweight='bold', fontsize=12)
+    axes[0].set_title('ML Forecast vs Actual Demand (Test Set)', fontsize=14, fontweight='bold')
+    axes[0].legend(loc='upper right', fontsize=11)
+    axes[0].grid(True, alpha=0.3)
+    
+    # Plot 2: Forecast errors over time
+    errors = predictions['lgb_error'].values[:window]
+    axes[1].plot(times, errors, linewidth=1.5, color='#E74C3C', alpha=0.7)
+    axes[1].axhline(y=0, color='black', linestyle='--', linewidth=2)
+    axes[1].fill_between(times, 0, errors, where=(errors > 0), 
+                        alpha=0.3, color='red', label='Over-prediction')
+    axes[1].fill_between(times, 0, errors, where=(errors < 0), 
+                        alpha=0.3, color='blue', label='Under-prediction')
+    axes[1].set_xlabel('Time (minutes)', fontweight='bold', fontsize=12)
+    axes[1].set_ylabel('Forecast Error', fontweight='bold', fontsize=12)
+    axes[1].set_title('Forecast Error Over Time', fontsize=14, fontweight='bold')
+    axes[1].legend(loc='upper right', fontsize=11)
+    axes[1].grid(True, alpha=0.3)
+    
+    # Add metrics text
+    mae = np.abs(errors).mean()
+    rmse = np.sqrt((errors ** 2).mean())
+    metrics_text = f'MAE: {mae:.4f}  |  RMSE: {rmse:.4f}'
+    axes[1].text(0.5, 0.95, metrics_text, transform=axes[1].transAxes,
+                ha='center', va='top', fontsize=11, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Forecast comparison plot saved: {output_path}")
+
+
+def plot_baseline_vs_proactive_comparison(
+    baseline_run_dir: Path,
+    proactive_run_dir: Path,
+    output_path: Optional[Path] = None
+) -> None:
+    """
+    Compare baseline (reactive) vs proactive (ML-driven) autoscaling performance.
+    
+    This visualization shows side-by-side comparison of:
+    - Machine count over time
+    - Utilization patterns
+    - SLA violations
+    - Total cost
+    
+    Args:
+        baseline_run_dir: Path to baseline autoscaler run directory
+        proactive_run_dir: Path to proactive autoscaler run directory
+        output_path: Optional path to save plot (defaults to proactive_run_dir/plots/comparison.png)
+    """
+    # Load timelines
+    baseline_timeline = pd.read_csv(baseline_run_dir / "timeline.csv")
+    proactive_timeline = pd.read_csv(proactive_run_dir / "timeline.csv")
+    
+    # Load metrics
+    import json
+    with open(baseline_run_dir / "metrics.json", 'r') as f:
+        baseline_metrics = json.load(f)
+    with open(proactive_run_dir / "metrics.json", 'r') as f:
+        proactive_metrics = json.load(f)
+    
+    # Set default output path
+    if output_path is None:
+        output_path = proactive_run_dir / "plots" / "baseline_vs_proactive.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create figure with 4 subplots
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+    
+    # Plot 1: Machine count comparison
+    axes[0, 0].plot(baseline_timeline['time'], baseline_timeline['machines'], 
+                   label='Baseline (Reactive)', linewidth=2, color='#3498DB', alpha=0.8)
+    axes[0, 0].plot(proactive_timeline['time'], proactive_timeline['machines'], 
+                   label='Proactive (ML)', linewidth=2, color='#9B59B6', alpha=0.8)
+    axes[0, 0].set_xlabel('Time (minutes)', fontweight='bold')
+    axes[0, 0].set_ylabel('Number of Machines', fontweight='bold')
+    axes[0, 0].set_title('Machine Count Over Time', fontsize=13, fontweight='bold')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # Plot 2: Utilization comparison
+    axes[0, 1].plot(baseline_timeline['time'], baseline_timeline['utilization'], 
+                   label='Baseline', linewidth=1.5, color='#3498DB', alpha=0.7)
+    axes[0, 1].plot(proactive_timeline['time'], proactive_timeline['utilization'], 
+                   label='Proactive', linewidth=1.5, color='#9B59B6', alpha=0.7)
+    axes[0, 1].axhline(y=1.0, color='red', linestyle='--', linewidth=2, label='SLA Threshold')
+    axes[0, 1].set_xlabel('Time (minutes)', fontweight='bold')
+    axes[0, 1].set_ylabel('Utilization', fontweight='bold')
+    axes[0, 1].set_title('Utilization Over Time', fontsize=13, fontweight='bold')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Plot 3: Violations comparison (bar chart)
+    categories = ['Total\nViolations', 'Violation\nRate (%)', 'Scale\nEvents']
+    baseline_values = [
+        baseline_metrics['total_violations'],
+        baseline_metrics['violation_rate'] * 100,
+        baseline_metrics['total_scale_events']
+    ]
+    proactive_values = [
+        proactive_metrics['total_violations'],
+        proactive_metrics['violation_rate'] * 100,
+        proactive_metrics['total_scale_events']
+    ]
+    
+    x = np.arange(len(categories))
+    width = 0.35
+    
+    axes[1, 0].bar(x - width/2, baseline_values, width, label='Baseline', 
+                  color='#3498DB', alpha=0.8)
+    axes[1, 0].bar(x + width/2, proactive_values, width, label='Proactive', 
+                  color='#9B59B6', alpha=0.8)
+    axes[1, 0].set_ylabel('Count / Rate', fontweight='bold')
+    axes[1, 0].set_title('Performance Metrics Comparison', fontsize=13, fontweight='bold')
+    axes[1, 0].set_xticks(x)
+    axes[1, 0].set_xticklabels(categories)
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3, axis='y')
+    
+    # Plot 4: Cost comparison
+    baseline_cost = baseline_metrics['total_cost']
+    proactive_cost = proactive_metrics['total_cost']
+    cost_savings = ((baseline_cost - proactive_cost) / baseline_cost * 100) if baseline_cost > 0 else 0
+    
+    axes[1, 1].bar(['Baseline', 'Proactive'], [baseline_cost, proactive_cost], 
+                  color=['#3498DB', '#9B59B6'], alpha=0.8, edgecolor='black', linewidth=2)
+    axes[1, 1].set_ylabel('Total Cost ($)', fontweight='bold')
+    axes[1, 1].set_title('Total Cost Comparison', fontsize=13, fontweight='bold')
+    axes[1, 1].grid(True, alpha=0.3, axis='y')
+    
+    # Add cost savings text
+    savings_text = f'Cost Savings: {cost_savings:+.1f}%'
+    savings_color = 'green' if cost_savings > 0 else 'red'
+    axes[1, 1].text(0.5, 0.95, savings_text, transform=axes[1, 1].transAxes,
+                   ha='center', va='top', fontsize=12, fontweight='bold',
+                   bbox=dict(boxstyle='round,pad=0.5', facecolor=savings_color, alpha=0.3))
+    
+    plt.suptitle('Baseline vs Proactive Autoscaling Comparison', 
+                fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Comparison plot saved: {output_path}")

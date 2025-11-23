@@ -12,6 +12,8 @@ from cloud_autoscale.config import load_config
 from cloud_autoscale.data import SyntheticLoader, GCP2019Loader
 from cloud_autoscale.simulation import CloudSimulator, BaselineAutoscaler, calculate_metrics, format_metrics_table
 from cloud_autoscale.visualization import create_all_plots
+from cloud_autoscale.forecasting import ForecastingModel
+from cloud_autoscale.simulation.autoscaler_proactive import ProactiveAutoscaler
 
 
 def main():
@@ -134,29 +136,84 @@ def run_simulation(args):
     # Initialize simulator
     print("🚀 Initializing simulator...")
     try:
-        simulator = CloudSimulator(config['simulation'])
-        print(f"   Step size: {config['simulation']['step_minutes']} minutes")
-        print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
+    simulator = CloudSimulator(config['simulation'])
+    print(f"   Step size: {config['simulation']['step_minutes']} minutes")
+    print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
         print(f"   Machine range: {config['simulation']['min_machines']}-{config['simulation']['max_machines']}")
-        print()
+    print()
     except Exception as e:
         print(f"❌ Error initializing simulator: {e}")
         sys.exit(1)
     
     # Initialize autoscaler
-    print("⚙️  Initializing baseline autoscaler...")
+    autoscaler_type = config['autoscaler'].get('type', 'baseline')
+    print(f"⚙️  Initializing {autoscaler_type} autoscaler...")
     try:
-        autoscaler = BaselineAutoscaler(
-            autoscaler_config=config['autoscaler'],
-            step_minutes=config['simulation']['step_minutes']
-        )
-        print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
-        print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
-        print(f"   Max scale per step: {config['autoscaler']['max_scale_per_step']}")
-        print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
+        if autoscaler_type == 'baseline':
+            autoscaler = BaselineAutoscaler(
+                autoscaler_config=config['autoscaler'],
+                step_minutes=config['simulation']['step_minutes']
+            )
+            print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
+            print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
+            print(f"   Max scale per step: {config['autoscaler']['max_scale_per_step']}")
+            print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
+        
+        elif autoscaler_type == 'proactive':
+            # Load forecasting model
+            model_run_dir = config['autoscaler'].get('model_run_dir', 'latest')
+            
+            if model_run_dir == 'latest':
+                # Auto-detect latest run with modeling artifacts
+                results_base = Path(config['output']['directory'])
+                run_dirs = sorted(results_base.glob('run_*'))
+                
+                # Find the latest run with modeling directory
+                model_run_dir = None
+                for run_dir in reversed(run_dirs):
+                    if (run_dir / 'modeling').exists():
+                        model_run_dir = run_dir
+                        break
+                
+                if model_run_dir is None:
+                    raise FileNotFoundError(
+                        f"No trained model found in {results_base}\n"
+                        f"Please run the modeling notebook first to train and save models."
+                    )
+                print(f"   Auto-detected model: {model_run_dir.name}")
+            else:
+                model_run_dir = Path(model_run_dir)
+                if not model_run_dir.exists():
+                    raise FileNotFoundError(f"Model run directory not found: {model_run_dir}")
+                print(f"   Using model: {model_run_dir}")
+            
+            # Load forecasting model
+            forecast_model = ForecastingModel(model_run_dir)
+            print(f"   ✓ Loaded forecasting model")
+            
+            # Create proactive autoscaler
+            autoscaler = ProactiveAutoscaler(
+                forecast_model=forecast_model,
+                autoscaler_config=config['autoscaler'],
+                step_minutes=config['simulation']['step_minutes'],
+                min_machines=config['simulation']['min_machines'],
+                max_machines=config['simulation']['max_machines']
+            )
+            print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
+            print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
+            print(f"   Max scale per step: {config['autoscaler']['max_scale_per_step']}")
+            print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
+            print(f"   Safety margin: {config['autoscaler'].get('safety_margin', 1.10)}")
+            print(f"   History window: {config['autoscaler'].get('history_window', 200)}")
+        
+        else:
+            raise ValueError(f"Invalid autoscaler type: {autoscaler_type}")
+        
         print()
     except Exception as e:
         print(f"❌ Error initializing autoscaler: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     # Run simulation

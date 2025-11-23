@@ -11,8 +11,8 @@ from typing import Dict, List, Any, Optional
 class CloudSimulator:
     """
     Pure capacity-based discrete-time simulator for cloud autoscaling.
-    
-    Production requirement: All configuration must be explicit.
+        
+        Production requirement: All configuration must be explicit.
     No defaults, no silent failures.
     """
     
@@ -22,8 +22,8 @@ class CloudSimulator:
         
         Args:
             sim_config: Simulation configuration dictionary
-                       Required keys: step_minutes, min_machines, max_machines,
-                                    machine_capacity, cost_per_machine_per_hour
+                    Required keys: step_minutes, min_machines, max_machines,
+                                 machine_capacity, cost_per_machine_per_hour
         
         Raises:
             ValueError: If required configuration keys are missing or invalid
@@ -136,6 +136,9 @@ class CloudSimulator:
         self.total_scale_events = 0
         self.total_cost = 0.0
         
+        # Build history for proactive autoscalers
+        history_rows = []
+        
         # Run simulation step by step
         for idx, row in demand_df.iterrows():
             step = int(row['step'])
@@ -156,14 +159,36 @@ class CloudSimulator:
             violation = 1 if utilization > 1.0 else 0
             self.total_violations += violation
             
-            # Make scaling decision
-            scaling_action = autoscaler.decide(
-                current_capacity=self.current_capacity,
-                current_machines=self.current_machines,
-                demand=total_demand,
-                utilization=utilization,
-                time=time
-            )
+            # Build history row for proactive autoscalers
+            history_row = {
+                'step': step,
+                'time': time,
+                'cpu_demand': cpu_demand,
+                'mem_demand': mem_demand,
+                'new_instances_norm': np.log1p(row.get('new_instances', 0))
+            }
+            history_rows.append(history_row)
+            history_df = pd.DataFrame(history_rows)
+            
+            # Make scaling decision (try with history_df for proactive autoscalers)
+            try:
+                scaling_action = autoscaler.decide(
+                    current_capacity=self.current_capacity,
+                    current_machines=self.current_machines,
+                    demand=total_demand,
+                    utilization=utilization,
+                    time=time,
+                    history_df=history_df
+                )
+            except TypeError:
+                # Fallback for baseline autoscaler that doesn't accept history_df
+                scaling_action = autoscaler.decide(
+                    current_capacity=self.current_capacity,
+                    current_machines=self.current_machines,
+                    demand=total_demand,
+                    utilization=utilization,
+                    time=time
+                )
             
             # Apply scaling action
             if scaling_action != 0:
@@ -208,10 +233,10 @@ class CloudSimulator:
         timeline_df = pd.DataFrame({
             'step': self.step_history,
             'time': self.time_history,
-            'demand': self.demand_history,
-            'capacity': self.capacity_history,
-            'utilization': self.utilization_history,
-            'machines': self.machine_history,
+                'demand': self.demand_history,
+                'capacity': self.capacity_history,
+                'utilization': self.utilization_history,
+                'machines': self.machine_history,
             'violation': self.violation_history
         })
         
