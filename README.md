@@ -1,21 +1,25 @@
 # Cloud AutoScale
 
-A clean, minimal baseline autoscaling simulator for cloud infrastructure - Master's Project.
+A production-grade autoscaling simulator for cloud infrastructure - Master's Project.
 
 ## 🎯 Project Overview
 
-This project implements a **baseline threshold-based autoscaling simulator** that:
+This project implements a **production-ready autoscaling simulator** that:
 
-- ✅ Loads synthetic demand patterns OR real GCP 2019 trace data
+- ✅ Loads synthetic demand patterns OR real GCP 2019 trace data (pre-processed)
 - ✅ Runs discrete-time simulation with configurable autoscaling policies
 - ✅ Generates comprehensive visualizations and metrics
-- ✅ Focuses ONLY on what's needed for academic evaluation
+- ✅ **Production-grade**: No defaults, fail-fast validation, explicit configuration
+- ✅ Ready for ML and RL extensions (EDA notebook included)
 
 ## 📦 Features
 
 ### Data Loading
 - **Synthetic Mode**: Generate demand patterns (periodic, bursty, random walk, spike)
-- **GCP 2019 Mode**: Load real Google Cloud Platform 2019 trace data
+- **GCP 2019 Mode**: Load pre-processed Google Cloud Platform 2019 trace data from Parquet files
+  - Uses `data/processed/cluster_level.parquet` (no raw JSONL processing)
+  - Efficient loading with Polars or Pandas
+  - No synthetic fallbacks - fails fast if data missing
 
 ### Simulation
 - Simple discrete-time loop over demand timeline
@@ -58,16 +62,19 @@ pip install -e .
 ### Run Simulation
 
 ```bash
-# Run with synthetic data (default)
+# Run with synthetic data
 uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
 
 # Run with different patterns
 uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml --pattern bursty
 uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml --pattern spike
 
-# Run with GCP 2019 data (after downloading data)
-# First, update the config to use mode: "gcp_2019" and set data.path
-uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
+# Run with GCP 2019 data (after processing data)
+# First, ensure processed data exists:
+uv run python data/retrievers/process_gcp_data.py
+
+# Then run with GCP config:
+uv run cloud-autoscale run --config cloud_autoscale/config/gcp2019.yaml
 ```
 
 ## 📁 Project Structure
@@ -93,33 +100,61 @@ cloud_autoscale/
 
 ## ⚙️ Configuration
 
-Edit `cloud_autoscale/config/baseline.yaml`:
+**⚠️ PRODUCTION MODE: All configuration fields are required. No defaults provided.**
+
+### Synthetic Mode (`cloud_autoscale/config/baseline.yaml`):
 
 ```yaml
-# Mode: "synthetic" or "gcp_2019"
 mode: "synthetic"
 
 data:
-  path: "data/raw/google"              # For GCP mode
   synthetic_pattern: "periodic"        # periodic, bursty, random_walk, spike
   duration_minutes: 60
 
 simulation:
   step_minutes: 5                      # Time step size
-  min_machines: 1
-  max_machines: 20
-  machine_capacity: 10                 # Units per machine
-  cost_per_machine_per_hour: 0.1
+  min_machines: 1                      # REQUIRED
+  max_machines: 20                     # REQUIRED
+  machine_capacity: 10                 # REQUIRED - units per machine
+  cost_per_machine_per_hour: 0.1      # REQUIRED
 
 autoscaler:
-  upper_threshold: 0.7                 # Scale up threshold
-  lower_threshold: 0.3                 # Scale down threshold
-  max_scale_per_step: 1
-  cooldown_steps: 2                    # Prevent thrashing
+  upper_threshold: 0.7                 # REQUIRED - scale up threshold
+  lower_threshold: 0.3                 # REQUIRED - scale down threshold
+  max_scale_per_step: 1               # REQUIRED
+  cooldown_steps: 2                    # REQUIRED - prevent thrashing
+
+output:
+  directory: "results"                 # REQUIRED
+```
+
+### GCP Mode (`cloud_autoscale/config/gcp2019.yaml`):
+
+```yaml
+mode: "gcp_2019"
+
+data:
+  processed_dir: "data/processed"      # REQUIRED - path to processed Parquet files
+  # duration_minutes: 1440             # OPTIONAL - limit simulation duration
+
+simulation:
+  step_minutes: 5
+  min_machines: 100                    # Larger scale for GCP data
+  max_machines: 5000
+  machine_capacity: 1
+  cost_per_machine_per_hour: 0.05
+
+autoscaler:
+  upper_threshold: 0.8
+  lower_threshold: 0.4
+  max_scale_per_step: 10
+  cooldown_steps: 3
 
 output:
   directory: "results"
 ```
+
+**Missing any required field will cause immediate failure with a clear error message.**
 
 ## 📊 Output
 
@@ -137,32 +172,35 @@ Each simulation run creates a timestamped directory in `results/` containing:
 
 ## 🔬 Using GCP 2019 Data
 
-### Download Data
+### Step 1: Download Raw Data
 
-Use the external scripts provided to download GCP 2019 trace data:
-
-```bash
-# Download using the provided scripts
-# (scripts should be in scripts/ directory)
-bash scripts/download_google_traces.sh
-```
-
-### Configure for GCP Mode
-
-Update `cloud_autoscale/config/baseline.yaml`:
-
-```yaml
-mode: "gcp_2019"
-data:
-  path: "data/raw/google"  # Path to downloaded data
-  duration_minutes: 60
-```
-
-### Run
+Use the provided retrieval script:
 
 ```bash
-uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
+uv run python data/retrievers/get_gcp_data.py
 ```
+
+This downloads raw JSONL.gz files to `data/raw/`.
+
+### Step 2: Process Data
+
+Convert raw data to processed Parquet files:
+
+```bash
+uv run python data/retrievers/process_gcp_data.py
+```
+
+This creates:
+- `data/processed/cluster_level.parquet` (required for simulation)
+- `data/processed/machine_level.parquet` (for EDA)
+
+### Step 3: Run Simulation
+
+```bash
+uv run cloud-autoscale run --config cloud_autoscale/config/gcp2019.yaml
+```
+
+**Note:** The GCP loader now uses pre-processed Parquet files only. No raw JSONL processing or synthetic fallbacks.
 
 ## 📈 Metrics Explained
 
@@ -185,9 +223,27 @@ uv run cloud-autoscale run --config cloud_autoscale/config/baseline.yaml
 ### Overall Performance
 - **Efficiency Score**: Composite score (0-100) balancing utilization, violations, and stability
 
-## 🧹 What Was Removed
+## 🔧 Production Refactoring (Latest)
 
-This refactored version removed:
+**See `REFACTORING.md` for complete details.**
+
+### What Changed:
+- ✅ **No configuration defaults** - all fields must be explicit
+- ✅ **Strict validation** - fails fast with clear error messages
+- ✅ **GCP loader rewritten** - uses processed Parquet files only
+- ✅ **No synthetic fallbacks** - real data or explicit error
+- ✅ **Type-safe access** - `config[key]` instead of `config.get(key, default)`
+- ✅ **Production-ready** - suitable for deployment and research
+
+### Migration:
+- Update config files to include ALL required fields
+- For GCP mode: use `processed_dir` instead of `path`
+- Run data processing pipeline before using GCP mode
+- See example configs: `config/baseline.yaml` and `config/gcp2019.yaml`
+
+## 🧹 What Was Removed (Previous Refactoring)
+
+Earlier cleanup removed:
 - ❌ Unused ML pipelines (Prophet, ARIMA, LSTM)
 - ❌ Unused RL environments (Stable Baselines)
 - ❌ Azure and Alibaba data loaders
@@ -195,7 +251,7 @@ This refactored version removed:
 - ❌ Over-engineered abstractions
 - ❌ Placeholder classes and unused features
 - ❌ Multiple scheduling algorithms (kept only baseline)
-- ❌ Excessive boilerplate and defaults
+- ❌ Excessive boilerplate
 
 ## 🎓 Academic Use
 

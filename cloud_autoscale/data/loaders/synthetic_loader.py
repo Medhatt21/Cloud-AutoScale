@@ -10,16 +10,41 @@ PatternType = Literal["periodic", "bursty", "random_walk", "spike"]
 class SyntheticLoader:
     """Generate synthetic demand patterns for autoscaling simulation."""
     
-    def __init__(self, pattern: PatternType = "periodic", duration_minutes: int = 60, step_minutes: int = 5, seed: int = 42):
+    def __init__(
+        self,
+        pattern: PatternType,
+        duration_minutes: int,
+        step_minutes: int,
+        seed: int
+    ):
         """
         Initialize synthetic data loader.
         
+        Production requirement: All parameters must be explicitly provided.
+        No default values allowed.
+        
         Args:
             pattern: Type of demand pattern to generate
+                     ('periodic', 'bursty', 'random_walk', 'spike')
             duration_minutes: Total duration of simulation in minutes
             step_minutes: Time step size in minutes
             seed: Random seed for reproducibility
+        
+        Raises:
+            ValueError: If pattern is invalid or parameters are out of range
         """
+        valid_patterns = ["periodic", "bursty", "random_walk", "spike"]
+        if pattern not in valid_patterns:
+            raise ValueError(
+                f"Invalid pattern: '{pattern}'. Must be one of {valid_patterns}"
+            )
+        
+        if duration_minutes <= 0:
+            raise ValueError("duration_minutes must be positive")
+        
+        if step_minutes <= 0:
+            raise ValueError("step_minutes must be positive")
+        
         self.pattern = pattern
         self.duration_minutes = duration_minutes
         self.step_minutes = step_minutes
@@ -28,28 +53,47 @@ class SyntheticLoader:
     
     def load(self) -> pd.DataFrame:
         """
-        Generate synthetic demand data.
+        Generate synthetic demand data for simulation.
+        
+        Returns simulation-ready DataFrame with minimal normalization only.
+        NO ML feature engineering (lags, rolling, etc.) - those belong in modeling notebooks.
         
         Returns:
-            DataFrame with columns: time, cpu_demand, mem_demand, new_instances
+            DataFrame with columns:
+            - step: int, 0..N-1 (sequential, no gaps)
+            - time: float, minutes since start (step * step_minutes)
+            - cpu_demand: float
+            - mem_demand: float
+            - new_instances: float (raw)
+            - new_instances_norm: float, log1p(new_instances) for stable signal
+            - machines_reporting: float (NaN for synthetic)
         """
         num_steps = self.duration_minutes // self.step_minutes
-        times = np.arange(0, num_steps) * self.step_minutes
+        steps = np.arange(num_steps, dtype=int)
+        times = steps * self.step_minutes
         
         if self.pattern == "periodic":
-            data = self._generate_periodic(times)
+            data = self._generate_periodic(steps, times)
         elif self.pattern == "bursty":
-            data = self._generate_bursty(times)
+            data = self._generate_bursty(steps, times)
         elif self.pattern == "random_walk":
-            data = self._generate_random_walk(times)
+            data = self._generate_random_walk(steps, times)
         elif self.pattern == "spike":
-            data = self._generate_spike(times)
+            data = self._generate_spike(steps, times)
         else:
             raise ValueError(f"Unknown pattern: {self.pattern}")
         
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        
+        # Minimal normalization for simulation stability only
+        df['new_instances_norm'] = np.log1p(df['new_instances'])
+        
+        # Add machines_reporting (NaN for synthetic data)
+        df['machines_reporting'] = np.nan
+        
+        return df
     
-    def _generate_periodic(self, times: np.ndarray) -> dict:
+    def _generate_periodic(self, steps: np.ndarray, times: np.ndarray) -> dict:
         """Generate periodic sinusoidal demand pattern."""
         # Sinusoidal pattern with period of 60 minutes
         cpu_demand = 30 + 20 * np.sin(2 * np.pi * times / 60)
@@ -63,13 +107,14 @@ class SyntheticLoader:
         new_instances = np.random.poisson(2, len(times))
         
         return {
+            'step': steps,
             'time': times,
             'cpu_demand': np.maximum(5, cpu_demand),
             'mem_demand': np.maximum(5, mem_demand),
             'new_instances': new_instances
         }
     
-    def _generate_bursty(self, times: np.ndarray) -> dict:
+    def _generate_bursty(self, steps: np.ndarray, times: np.ndarray) -> dict:
         """Generate bursty demand pattern with sudden spikes."""
         base_cpu = 15
         base_mem = 15
@@ -97,13 +142,14 @@ class SyntheticLoader:
         mem_demand += np.random.normal(0, 2, len(times))
         
         return {
+            'step': steps,
             'time': times,
             'cpu_demand': np.maximum(5, cpu_demand),
             'mem_demand': np.maximum(5, mem_demand),
             'new_instances': new_instances
         }
     
-    def _generate_random_walk(self, times: np.ndarray) -> dict:
+    def _generate_random_walk(self, steps: np.ndarray, times: np.ndarray) -> dict:
         """Generate random walk demand pattern."""
         cpu_demand = np.zeros(len(times))
         mem_demand = np.zeros(len(times))
@@ -124,13 +170,14 @@ class SyntheticLoader:
         new_instances = np.random.poisson(2, len(times))
         
         return {
+            'step': steps,
             'time': times,
             'cpu_demand': cpu_demand,
             'mem_demand': mem_demand,
             'new_instances': new_instances
         }
     
-    def _generate_spike(self, times: np.ndarray) -> dict:
+    def _generate_spike(self, steps: np.ndarray, times: np.ndarray) -> dict:
         """Generate demand pattern with sharp spikes."""
         base_cpu = 10
         base_mem = 10
@@ -154,6 +201,7 @@ class SyntheticLoader:
         mem_demand += np.random.normal(0, 1, len(times))
         
         return {
+            'step': steps,
             'time': times,
             'cpu_demand': np.maximum(5, cpu_demand),
             'mem_demand': np.maximum(5, mem_demand),

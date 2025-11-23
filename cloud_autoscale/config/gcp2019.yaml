@@ -1,0 +1,54 @@
+# Cloud AutoScale - GCP 2019 Configuration
+# All fields are required - no defaults are provided in code
+
+# Mode: "synthetic" or "gcp_2019"
+mode: "gcp_2019"
+
+# Data configuration
+data:
+  # Path to processed Parquet files directory
+  # This directory must contain cluster_level.parquet
+  processed_dir: "data/processed"
+  
+  # Optional: Limit simulation duration in minutes
+  # If not specified, all available data will be used
+  # duration_minutes: 1440  # 24 hours
+
+# Simulation configuration
+simulation:
+  # Time step size in minutes (should match data processing bucket size)
+  step_minutes: 5
+  
+  # Minimum number of machines
+  min_machines: 100
+  
+  # Maximum number of machines
+  max_machines: 5000
+  
+  # Capacity per machine (in units)
+  # For GCP data, this represents normalized capacity
+  machine_capacity: 1
+  
+  # Cost per machine per hour (in dollars)
+  # Adjust based on your cloud provider pricing
+  cost_per_machine_per_hour: 0.05
+
+# Autoscaler configuration
+autoscaler:
+  # Scale up when utilization exceeds this threshold
+  upper_threshold: 0.8
+  
+  # Scale down when utilization falls below this threshold
+  lower_threshold: 0.4
+  
+  # Maximum machines to add/remove per scaling action
+  max_scale_per_step: 10
+  
+  # Cooldown period in time steps (to prevent thrashing)
+  cooldown_steps: 3
+
+# Output configuration
+output:
+  # Directory to save results
+  directory: "results"
+

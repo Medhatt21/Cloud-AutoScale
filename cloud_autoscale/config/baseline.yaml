@@ -1,13 +1,11 @@
-# Cloud AutoScale - Baseline Configuration
+# Cloud AutoScale - Baseline Configuration (Synthetic Mode)
+# All fields are required - no defaults are provided in code
 
 # Mode: "synthetic" or "gcp_2019"
 mode: "synthetic"
 
 # Data configuration
 data:
-  # Path to data files (for gcp_2019 mode)
-  path: "data/raw/google"
-  
   # Synthetic pattern: "periodic", "bursty", "random_walk", "spike"
   synthetic_pattern: "periodic"
   
@@ -49,4 +47,3 @@ autoscaler:
 output:
   # Directory to save results
   directory: "results"
-
