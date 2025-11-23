@@ -25,6 +25,7 @@ dependencies = [
     "nbconvert>=7.16.6",
     "statsmodels>=0.14.5",
     "scikit-learn>=1.7.2",
+    "lightgbm>=4.6.0",
 ]
 
 [project.optional-dependencies]

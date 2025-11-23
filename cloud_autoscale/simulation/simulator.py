@@ -11,8 +11,8 @@ from typing import Dict, List, Any, Optional
 class CloudSimulator:
     """
     Pure capacity-based discrete-time simulator for cloud autoscaling.
-    
-    Production requirement: All configuration must be explicit.
+        
+        Production requirement: All configuration must be explicit.
     No defaults, no silent failures.
     """
     
@@ -22,8 +22,8 @@ class CloudSimulator:
         
         Args:
             sim_config: Simulation configuration dictionary
-                       Required keys: step_minutes, min_machines, max_machines,
-                                    machine_capacity, cost_per_machine_per_hour
+                    Required keys: step_minutes, min_machines, max_machines,
+                                 machine_capacity, cost_per_machine_per_hour
         
         Raises:
             ValueError: If required configuration keys are missing or invalid
@@ -208,10 +208,10 @@ class CloudSimulator:
         timeline_df = pd.DataFrame({
             'step': self.step_history,
             'time': self.time_history,
-            'demand': self.demand_history,
-            'capacity': self.capacity_history,
-            'utilization': self.utilization_history,
-            'machines': self.machine_history,
+                'demand': self.demand_history,
+                'capacity': self.capacity_history,
+                'utilization': self.utilization_history,
+                'machines': self.machine_history,
             'violation': self.violation_history
         })
         

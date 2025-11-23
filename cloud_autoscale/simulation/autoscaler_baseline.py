@@ -6,8 +6,8 @@ from typing import Dict, Any
 class BaselineAutoscaler:
     """
     Simple threshold-based autoscaling policy.
-    
-    Production requirement: All configuration must be explicit.
+        
+        Production requirement: All configuration must be explicit.
     No defaults, no silent failures.
     """
     
@@ -17,7 +17,7 @@ class BaselineAutoscaler:
         
         Args:
             autoscaler_config: Autoscaler configuration dictionary
-                              Required keys: upper_threshold, lower_threshold,
+                    Required keys: upper_threshold, lower_threshold,
                                            max_scale_per_step, cooldown_steps
             step_minutes: Time step size in minutes (from simulation config)
         

@@ -134,11 +134,11 @@ def run_simulation(args):
     # Initialize simulator
     print("🚀 Initializing simulator...")
     try:
-        simulator = CloudSimulator(config['simulation'])
-        print(f"   Step size: {config['simulation']['step_minutes']} minutes")
-        print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
+    simulator = CloudSimulator(config['simulation'])
+    print(f"   Step size: {config['simulation']['step_minutes']} minutes")
+    print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
         print(f"   Machine range: {config['simulation']['min_machines']}-{config['simulation']['max_machines']}")
-        print()
+    print()
     except Exception as e:
         print(f"❌ Error initializing simulator: {e}")
         sys.exit(1)
@@ -150,11 +150,11 @@ def run_simulation(args):
             autoscaler_config=config['autoscaler'],
             step_minutes=config['simulation']['step_minutes']
         )
-        print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
-        print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
+    print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
+    print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
         print(f"   Max scale per step: {config['autoscaler']['max_scale_per_step']}")
         print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
-        print()
+    print()
     except Exception as e:
         print(f"❌ Error initializing autoscaler: {e}")
         sys.exit(1)
