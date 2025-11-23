@@ -142,3 +142,76 @@ def format_metrics_table(metrics: Dict[str, Any]) -> str:
     
     return "\n".join(lines)
 
+
+def compare_metrics(baseline_metrics: Dict[str, Any], proactive_metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compare baseline vs proactive autoscaler metrics.
+    
+    Args:
+        baseline_metrics: Metrics from baseline autoscaler run
+        proactive_metrics: Metrics from proactive autoscaler run
+    
+    Returns:
+        Dictionary with comparison metrics
+    """
+    # Extract key metrics
+    baseline_violations = baseline_metrics['total_violations']
+    proactive_violations = proactive_metrics['total_violations']
+    
+    baseline_viol_rate = baseline_metrics['violation_rate']
+    proactive_viol_rate = proactive_metrics['violation_rate']
+    
+    baseline_cost = baseline_metrics['total_cost']
+    proactive_cost = proactive_metrics['total_cost']
+    
+    baseline_util = baseline_metrics['avg_utilization']
+    proactive_util = proactive_metrics['avg_utilization']
+    
+    baseline_stability = baseline_metrics['total_scale_events']
+    proactive_stability = proactive_metrics['total_scale_events']
+    
+    # Calculate improvements (positive = proactive is better)
+    sla_improvement = (
+        ((baseline_viol_rate - proactive_viol_rate) / baseline_viol_rate * 100)
+        if baseline_viol_rate > 0 else 0
+    )
+    
+    cost_change_percent = (
+        ((proactive_cost - baseline_cost) / baseline_cost * 100)
+        if baseline_cost > 0 else 0
+    )
+    
+    violation_reduction_percent = (
+        ((baseline_violations - proactive_violations) / baseline_violations * 100)
+        if baseline_violations > 0 else 0
+    )
+    
+    avg_utilization_gain = (proactive_util - baseline_util) * 100  # percentage points
+    
+    stability_change = proactive_stability - baseline_stability  # negative = more stable
+    
+    comparison = {
+        'sla_improvement': float(sla_improvement),
+        'cost_change_percent': float(cost_change_percent),
+        'cost_savings_percent': float(-cost_change_percent),  # Positive = savings
+        'violation_reduction_percent': float(violation_reduction_percent),
+        'avg_utilization_gain': float(avg_utilization_gain),
+        'stability_change': int(stability_change),
+        'baseline': {
+            'violations': int(baseline_violations),
+            'violation_rate': float(baseline_viol_rate),
+            'cost': float(baseline_cost),
+            'avg_utilization': float(baseline_util),
+            'scale_events': int(baseline_stability)
+        },
+        'proactive': {
+            'violations': int(proactive_violations),
+            'violation_rate': float(proactive_viol_rate),
+            'cost': float(proactive_cost),
+            'avg_utilization': float(proactive_util),
+            'scale_events': int(proactive_stability)
+        }
+    }
+    
+    return comparison
+

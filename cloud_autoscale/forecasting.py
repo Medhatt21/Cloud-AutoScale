@@ -112,8 +112,10 @@ class ForecastingModel:
         df["mem_diff1"] = df["mem_demand"].diff()
         
         # Cyclical (288 steps per day for 5-minute intervals)
-        df["sin_day"] = np.sin(2 * np.pi * df["step"] / 288.0)
-        df["cos_day"] = np.cos(2 * np.pi * df["step"] / 288.0)
+        # Ensure step is numeric to avoid type issues
+        step_values = pd.to_numeric(df["step"], errors='coerce').fillna(0).astype(float)
+        df["sin_day"] = np.sin(2 * np.pi * step_values / 288.0)
+        df["cos_day"] = np.cos(2 * np.pi * step_values / 288.0)
         
         return df
     

@@ -633,3 +633,342 @@ def plot_baseline_vs_proactive_comparison(
     plt.close()
     
     print(f"✓ Comparison plot saved: {output_path}")
+
+
+def create_comparison_plots(
+    baseline_results: Dict[str, Any],
+    proactive_results: Dict[str, Any],
+    merged_df: pd.DataFrame,
+    comparison_metrics: Dict[str, Any],
+    output_dir: Path
+) -> None:
+    """
+    Create comprehensive comparison plots between baseline and proactive autoscalers.
+    
+    Args:
+        baseline_results: Results dictionary from baseline simulation
+        proactive_results: Results dictionary from proactive simulation
+        merged_df: Merged timeline DataFrame with both runs
+        comparison_metrics: Comparison metrics dictionary
+        output_dir: Directory to save plots
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create individual comparison plots
+    plot_demand_capacity_compare(merged_df, output_dir / "demand_capacity_compare.png")
+    plot_machines_compare(merged_df, output_dir / "machines_compare.png")
+    plot_violations_compare(merged_df, comparison_metrics, output_dir / "violations_compare.png")
+    plot_cost_compare(comparison_metrics, output_dir / "cost_compare.png")
+    plot_comparison_summary(comparison_metrics, output_dir / "summary.png")
+    
+    print(f"✓ All comparison plots saved to {output_dir}")
+
+
+def plot_demand_capacity_compare(
+    merged_df: pd.DataFrame,
+    output_path: Path
+) -> None:
+    """
+    Plot demand with baseline and proactive capacity overlays.
+    
+    Args:
+        merged_df: Merged timeline DataFrame
+        output_path: Path to save plot
+    """
+    fig, ax = plt.subplots(figsize=(16, 8))
+    
+    # Plot demand (same for both)
+    ax.plot(merged_df['time'], merged_df['baseline_demand'], 
+            label='Demand', color='black', linewidth=2.5, alpha=0.9, zorder=3)
+    
+    # Plot baseline capacity
+    ax.plot(merged_df['time'], merged_df['baseline_capacity'], 
+            label='Baseline Capacity', color='#3498DB', linewidth=2, 
+            alpha=0.7, linestyle='--')
+    
+    # Plot proactive capacity
+    ax.plot(merged_df['time'], merged_df['proactive_capacity'], 
+            label='Proactive Capacity', color='#9B59B6', linewidth=2, 
+            alpha=0.7, linestyle='-.')
+    
+    # Shade violation regions
+    baseline_violations = merged_df['baseline_violation'] > 0
+    proactive_violations = merged_df['proactive_violation'] > 0
+    
+    if baseline_violations.any():
+        ax.fill_between(merged_df['time'], 0, merged_df['baseline_demand'].max() * 1.1,
+                        where=baseline_violations, alpha=0.1, color='red', 
+                        label='Baseline Violations')
+    
+    if proactive_violations.any():
+        ax.fill_between(merged_df['time'], 0, merged_df['baseline_demand'].max() * 1.1,
+                        where=proactive_violations, alpha=0.1, color='orange', 
+                        label='Proactive Violations')
+    
+    ax.set_xlabel('Time (minutes)', fontsize=13, fontweight='bold')
+    ax.set_ylabel('Resource Units', fontsize=13, fontweight='bold')
+    ax.set_title('Demand vs Capacity: Baseline vs Proactive', fontsize=16, fontweight='bold', pad=20)
+    ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_machines_compare(
+    merged_df: pd.DataFrame,
+    output_path: Path
+) -> None:
+    """
+    Plot machine count comparison between baseline and proactive.
+    
+    Args:
+        merged_df: Merged timeline DataFrame
+        output_path: Path to save plot
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
+    
+    # Plot 1: Overlaid machine counts
+    ax1.plot(merged_df['time'], merged_df['baseline_machines'], 
+            label='Baseline', color='#3498DB', linewidth=2, alpha=0.8)
+    ax1.plot(merged_df['time'], merged_df['proactive_machines'], 
+            label='Proactive', color='#9B59B6', linewidth=2, alpha=0.8)
+    ax1.fill_between(merged_df['time'], 
+                     merged_df['baseline_machines'], 
+                     merged_df['proactive_machines'],
+                     alpha=0.2, color='gray')
+    ax1.set_xlabel('Time (minutes)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Number of Machines', fontsize=12, fontweight='bold')
+    ax1.set_title('Machine Count Over Time', fontsize=14, fontweight='bold')
+    ax1.legend(loc='upper left', fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Machine count difference
+    machine_diff = merged_df['proactive_machines'] - merged_df['baseline_machines']
+    colors = ['green' if x < 0 else 'red' for x in machine_diff]
+    ax2.fill_between(merged_df['time'], 0, machine_diff, alpha=0.5, color='purple')
+    ax2.axhline(y=0, color='black', linestyle='--', linewidth=2)
+    ax2.set_xlabel('Time (minutes)', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Machine Difference (Proactive - Baseline)', fontsize=12, fontweight='bold')
+    ax2.set_title('Machine Count Difference', fontsize=14, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    
+    # Add text annotation
+    avg_diff = machine_diff.mean()
+    diff_text = f'Avg Difference: {avg_diff:+.1f} machines'
+    ax2.text(0.02, 0.95, diff_text, transform=ax2.transAxes,
+            fontsize=11, fontweight='bold', va='top',
+            bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_violations_compare(
+    merged_df: pd.DataFrame,
+    comparison_metrics: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """
+    Plot SLA violations comparison.
+    
+    Args:
+        merged_df: Merged timeline DataFrame
+        comparison_metrics: Comparison metrics dictionary
+        output_path: Path to save plot
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Plot 1: Violations over time
+    baseline_viol_cumsum = merged_df['baseline_violation'].cumsum()
+    proactive_viol_cumsum = merged_df['proactive_violation'].cumsum()
+    
+    ax1.plot(merged_df['time'], baseline_viol_cumsum, 
+            label='Baseline', color='#3498DB', linewidth=2.5, alpha=0.8)
+    ax1.plot(merged_df['time'], proactive_viol_cumsum, 
+            label='Proactive', color='#9B59B6', linewidth=2.5, alpha=0.8)
+    ax1.set_xlabel('Time (minutes)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Cumulative Violations', fontsize=12, fontweight='bold')
+    ax1.set_title('Cumulative SLA Violations', fontsize=14, fontweight='bold')
+    ax1.legend(loc='upper left', fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Total violations bar chart
+    baseline_total = comparison_metrics['baseline']['violations']
+    proactive_total = comparison_metrics['proactive']['violations']
+    reduction = comparison_metrics['violation_reduction_percent']
+    
+    bars = ax2.bar(['Baseline', 'Proactive'], [baseline_total, proactive_total],
+                   color=['#3498DB', '#9B59B6'], alpha=0.8, edgecolor='black', linewidth=2)
+    ax2.set_ylabel('Total Violations', fontsize=12, fontweight='bold')
+    ax2.set_title(f'Total Violations (Reduction: {reduction:.1f}%)', 
+                  fontsize=14, fontweight='bold')
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels
+    for bar in bars:
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(height)}',
+                ha='center', va='bottom', fontsize=12, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_cost_compare(
+    comparison_metrics: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """
+    Plot cost comparison between baseline and proactive.
+    
+    Args:
+        comparison_metrics: Comparison metrics dictionary
+        output_path: Path to save plot
+    """
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    baseline_cost = comparison_metrics['baseline']['cost']
+    proactive_cost = comparison_metrics['proactive']['cost']
+    savings_percent = comparison_metrics['cost_savings_percent']
+    
+    bars = ax.bar(['Baseline', 'Proactive'], [baseline_cost, proactive_cost],
+                  color=['#3498DB', '#9B59B6'], alpha=0.8, 
+                  edgecolor='black', linewidth=2.5, width=0.6)
+    
+    ax.set_ylabel('Total Cost ($)', fontsize=13, fontweight='bold')
+    ax.set_title('Total Cost Comparison', fontsize=16, fontweight='bold', pad=20)
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'${height:.2f}',
+                ha='center', va='bottom', fontsize=12, fontweight='bold')
+    
+    # Add savings annotation
+    savings_text = f'Cost Savings: {savings_percent:+.1f}%'
+    savings_color = 'green' if savings_percent > 0 else 'red'
+    ax.text(0.5, 0.95, savings_text, transform=ax.transAxes,
+           ha='center', va='top', fontsize=14, fontweight='bold',
+           bbox=dict(boxstyle='round,pad=0.8', facecolor=savings_color, alpha=0.4))
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_comparison_summary(
+    comparison_metrics: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """
+    Create a comprehensive summary dashboard comparing baseline vs proactive.
+    
+    Args:
+        comparison_metrics: Comparison metrics dictionary
+        output_path: Path to save plot
+    """
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 2, hspace=0.4, wspace=0.3)
+    
+    # Title
+    fig.suptitle('Baseline vs Proactive Autoscaling - Performance Summary', 
+                fontsize=18, fontweight='bold', y=0.98)
+    
+    # 1. SLA Improvement
+    ax1 = fig.add_subplot(gs[0, 0])
+    sla_improvement = comparison_metrics['sla_improvement']
+    baseline_viol = comparison_metrics['baseline']['violations']
+    proactive_viol = comparison_metrics['proactive']['violations']
+    
+    bars = ax1.bar(['Baseline', 'Proactive'], [baseline_viol, proactive_viol],
+                   color=['#E74C3C', '#2ECC71'], alpha=0.7, edgecolor='black')
+    ax1.set_ylabel('Total Violations', fontsize=11, fontweight='bold')
+    ax1.set_title(f'SLA Violations (Improvement: {sla_improvement:+.1f}%)', 
+                  fontsize=12, fontweight='bold')
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # 2. Cost Comparison
+    ax2 = fig.add_subplot(gs[0, 1])
+    baseline_cost = comparison_metrics['baseline']['cost']
+    proactive_cost = comparison_metrics['proactive']['cost']
+    cost_savings = comparison_metrics['cost_savings_percent']
+    
+    bars = ax2.bar(['Baseline', 'Proactive'], [baseline_cost, proactive_cost],
+                   color=['#3498DB', '#9B59B6'], alpha=0.7, edgecolor='black')
+    ax2.set_ylabel('Total Cost ($)', fontsize=11, fontweight='bold')
+    ax2.set_title(f'Total Cost (Savings: {cost_savings:+.1f}%)', 
+                  fontsize=12, fontweight='bold')
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # 3. Utilization Comparison
+    ax3 = fig.add_subplot(gs[1, 0])
+    baseline_util = comparison_metrics['baseline']['avg_utilization'] * 100
+    proactive_util = comparison_metrics['proactive']['avg_utilization'] * 100
+    util_gain = comparison_metrics['avg_utilization_gain']
+    
+    bars = ax3.barh(['Baseline', 'Proactive'], [baseline_util, proactive_util],
+                    color=['#3498DB', '#9B59B6'], alpha=0.7, edgecolor='black')
+    ax3.set_xlabel('Average Utilization (%)', fontsize=11, fontweight='bold')
+    ax3.set_title(f'Utilization (Gain: {util_gain:+.1f}pp)', 
+                  fontsize=12, fontweight='bold')
+    ax3.grid(True, alpha=0.3, axis='x')
+    
+    # 4. Stability (Scaling Events)
+    ax4 = fig.add_subplot(gs[1, 1])
+    baseline_events = comparison_metrics['baseline']['scale_events']
+    proactive_events = comparison_metrics['proactive']['scale_events']
+    stability_change = comparison_metrics['stability_change']
+    
+    bars = ax4.bar(['Baseline', 'Proactive'], [baseline_events, proactive_events],
+                   color=['#F39C12', '#16A085'], alpha=0.7, edgecolor='black')
+    ax4.set_ylabel('Total Scaling Events', fontsize=11, fontweight='bold')
+    ax4.set_title(f'Stability (Change: {stability_change:+d} events)', 
+                  fontsize=12, fontweight='bold')
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    # 5. Overall Metrics Table
+    ax5 = fig.add_subplot(gs[2, :])
+    ax5.axis('off')
+    
+    summary_text = f"""
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║                         COMPARISON SUMMARY                                    ║
+    ╠══════════════════════════════════════════════════════════════════════════════╣
+    ║                                                                               ║
+    ║  SLA PERFORMANCE                                                              ║
+    ║    • Violation Reduction:     {comparison_metrics['violation_reduction_percent']:>6.1f}%                                      ║
+    ║    • Baseline Violations:     {baseline_viol:>6d}                                           ║
+    ║    • Proactive Violations:    {proactive_viol:>6d}                                           ║
+    ║                                                                               ║
+    ║  COST EFFICIENCY                                                              ║
+    ║    • Cost Savings:            {cost_savings:>6.1f}%                                      ║
+    ║    • Baseline Cost:          ${baseline_cost:>7.2f}                                        ║
+    ║    • Proactive Cost:         ${proactive_cost:>7.2f}                                        ║
+    ║                                                                               ║
+    ║  RESOURCE UTILIZATION                                                         ║
+    ║    • Utilization Gain:        {util_gain:>6.1f} pp                                     ║
+    ║    • Baseline Utilization:    {baseline_util:>6.1f}%                                      ║
+    ║    • Proactive Utilization:   {proactive_util:>6.1f}%                                      ║
+    ║                                                                               ║
+    ║  SYSTEM STABILITY                                                             ║
+    ║    • Scaling Event Change:    {stability_change:>6d}                                           ║
+    ║    • Baseline Events:         {baseline_events:>6d}                                           ║
+    ║    • Proactive Events:        {proactive_events:>6d}                                           ║
+    ║                                                                               ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+    """
+    
+    ax5.text(0.5, 0.5, summary_text, 
+            ha='center', va='center',
+            fontsize=10, family='monospace',
+            bbox=dict(boxstyle='round,pad=1.5', facecolor='lightblue', alpha=0.2))
+    
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
