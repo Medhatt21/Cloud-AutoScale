@@ -31,8 +31,7 @@ def main():
         'upper_threshold': 0.7,
         'lower_threshold': 0.3,
         'max_scale_per_step': 1,
-        'cooldown_steps': 2,
-        'step_minutes': 5
+        'cooldown_steps': 2
     }
     
     # Load synthetic data
@@ -50,7 +49,10 @@ def main():
     # Initialize simulator and autoscaler
     print("Initializing simulator...")
     simulator = CloudSimulator(config)
-    autoscaler = BaselineAutoscaler(autoscaler_config)
+    autoscaler = BaselineAutoscaler(
+        autoscaler_config=autoscaler_config,
+        step_minutes=config['step_minutes']
+    )
     print()
     
     # Run simulation

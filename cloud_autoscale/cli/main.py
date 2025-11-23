@@ -82,18 +82,21 @@ def run_simulation(args):
     print("📊 Loading demand data...")
     try:
         if config['mode'] == 'synthetic':
-            # Strict access - no defaults
+            # Strict access - all parameters required
             pattern = config['data']['synthetic_pattern']
             duration = config['data']['duration_minutes']
             step = config['simulation']['step_minutes']
+            seed = 42  # Fixed seed for reproducibility
             
             loader = SyntheticLoader(
                 pattern=pattern,
                 duration_minutes=duration,
-                step_minutes=step
+                step_minutes=step,
+                seed=seed
             )
             print(f"   Pattern: {pattern}")
             print(f"   Duration: {duration} minutes")
+            print(f"   Seed: {seed}")
             
         elif config['mode'] == 'gcp_2019':
             # Use processed_dir instead of raw path
@@ -130,23 +133,41 @@ def run_simulation(args):
     
     # Initialize simulator
     print("🚀 Initializing simulator...")
-    simulator = CloudSimulator(config['simulation'])
-    print(f"   Step size: {config['simulation']['step_minutes']} minutes")
-    print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
-    print()
+    try:
+        simulator = CloudSimulator(config['simulation'])
+        print(f"   Step size: {config['simulation']['step_minutes']} minutes")
+        print(f"   Machine capacity: {config['simulation']['machine_capacity']} units")
+        print(f"   Machine range: {config['simulation']['min_machines']}-{config['simulation']['max_machines']}")
+        print()
+    except Exception as e:
+        print(f"❌ Error initializing simulator: {e}")
+        sys.exit(1)
     
     # Initialize autoscaler
     print("⚙️  Initializing baseline autoscaler...")
-    autoscaler_config = {**config['autoscaler'], 'step_minutes': config['simulation']['step_minutes']}
-    autoscaler = BaselineAutoscaler(autoscaler_config)
-    print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
-    print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
-    print()
+    try:
+        autoscaler = BaselineAutoscaler(
+            autoscaler_config=config['autoscaler'],
+            step_minutes=config['simulation']['step_minutes']
+        )
+        print(f"   Upper threshold: {config['autoscaler']['upper_threshold']}")
+        print(f"   Lower threshold: {config['autoscaler']['lower_threshold']}")
+        print(f"   Max scale per step: {config['autoscaler']['max_scale_per_step']}")
+        print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
+        print()
+    except Exception as e:
+        print(f"❌ Error initializing autoscaler: {e}")
+        sys.exit(1)
     
     # Run simulation
     print("▶️  Running simulation...")
     try:
-        results = simulator.run(demand_df, autoscaler)
+        results = simulator.run(
+            demand_df,
+            autoscaler,
+            output_dir=config['output']['directory'],
+            save_results=True
+        )
         print("   ✓ Simulation completed")
         print()
     except Exception as e:
@@ -155,53 +176,40 @@ def run_simulation(args):
         traceback.print_exc()
         sys.exit(1)
     
-    # Calculate metrics
-    print("📈 Calculating metrics...")
-    metrics = calculate_metrics(results)
+    # Get run directory from results
+    run_dir = Path(results.get('run_dir', config['output']['directory']))
+    
+    # Calculate metrics (already in results)
+    metrics = results['metrics']
+    
+    # Display metrics summary
+    print("📈 Simulation Results:")
     print()
-    
-    # Display metrics
-    print(format_metrics_table(metrics))
+    print(f"   Total Violations:    {metrics['total_violations']}")
+    print(f"   Violation Rate:      {metrics['violation_rate']:.2%}")
+    print(f"   Avg Utilization:     {metrics['avg_utilization']:.2%}")
+    print(f"   Avg Machines:        {metrics['avg_machines']:.1f}")
+    print(f"   Total Scale Events:  {metrics['total_scale_events']}")
+    print(f"   Total Cost:          ${metrics['total_cost']:.2f}")
     print()
-    
-    # Create output directory
-    output_dir = Path(config['output']['directory'])
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = output_dir / f"run_{timestamp}"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save results
-    print(f"💾 Saving results to: {run_dir}")
-    
-    # Save timeline data
-    timeline_path = run_dir / "timeline.csv"
-    results['timeline'].to_csv(timeline_path, index=False)
-    print(f"   ✓ Timeline data: {timeline_path}")
-    
-    # Save metrics
-    import json
-    metrics_path = run_dir / "metrics.json"
-    with open(metrics_path, 'w') as f:
-        json.dump(metrics, f, indent=2)
-    print(f"   ✓ Metrics: {metrics_path}")
     
     # Save config
     import yaml
     config_path = run_dir / "config.yaml"
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
-    print(f"   ✓ Configuration: {config_path}")
-    
-    print()
+    print(f"💾 Configuration saved: {config_path}")
     
     # Create visualizations
     print("📊 Creating visualizations...")
     try:
         plots_dir = run_dir / "plots"
-        create_all_plots(results, metrics, plots_dir)
-        print(f"   ✓ Plots saved to: {plots_dir}")
+        create_all_plots(results, metrics, plots_dir, config.get('autoscaler'))
+        print(f"   ✓ All plots saved to: {plots_dir}")
     except Exception as e:
         print(f"⚠️  Warning: Could not create plots: {e}")
+        import traceback
+        traceback.print_exc()
     
     print()
     print("=" * 70)
@@ -209,6 +217,10 @@ def run_simulation(args):
     print("=" * 70)
     print()
     print(f"Results saved to: {run_dir}")
+    print(f"  - Timeline: {run_dir}/timeline.csv")
+    print(f"  - Metrics: {run_dir}/metrics.json")
+    print(f"  - Events: {run_dir}/scale_events.csv")
+    print(f"  - Plots: {run_dir}/plots/")
     print()
 
 

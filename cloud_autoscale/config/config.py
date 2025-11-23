@@ -9,31 +9,38 @@ def load_config(config_path: str) -> Dict[str, Any]:
     """
     Load configuration from YAML file.
     
+    Production requirement: All configuration must be explicit.
+    No defaults are provided. Missing fields will raise clear errors.
+    
     Args:
         config_path: Path to YAML config file
     
     Returns:
-        Configuration dictionary
+        Validated configuration dictionary
     
     Raises:
         FileNotFoundError: If config file doesn't exist
-        ValueError: If configuration is invalid
+        ValueError: If YAML parsing fails or configuration is invalid
     """
     path = Path(config_path)
     
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(path, 'r') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse YAML config file: {e}")
     
-    # Validate config
-    validate_config(config)
+    if config is None:
+        raise ValueError(f"Config file is empty: {config_path}")
     
-    return config
+    # Validate and return
+    return validate_config(config)
 
 
-def validate_config(config: Dict[str, Any]) -> None:
+def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate configuration structure and values.
     
@@ -42,6 +49,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     
     Args:
         config: Configuration dictionary
+    
+    Returns:
+        Validated configuration dictionary (same as input)
     
     Raises:
         ValueError: If configuration is invalid or incomplete
@@ -63,9 +73,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     if config['mode'] == 'synthetic':
         # Synthetic mode requires pattern and duration
         if 'synthetic_pattern' not in data_config:
-            raise ValueError("Missing data.synthetic_pattern for synthetic mode")
+            raise ValueError("Missing required key 'data.synthetic_pattern' in config")
         if 'duration_minutes' not in data_config:
-            raise ValueError("Missing data.duration_minutes for synthetic mode")
+            raise ValueError("Missing required key 'data.duration_minutes' in config")
         
         valid_patterns = ['periodic', 'bursty', 'random_walk', 'spike']
         if data_config['synthetic_pattern'] not in valid_patterns:
@@ -73,11 +83,17 @@ def validate_config(config: Dict[str, Any]) -> None:
                 f"Invalid synthetic_pattern: '{data_config['synthetic_pattern']}'. "
                 f"Must be one of {valid_patterns}"
             )
+        
+        # Validate type
+        if not isinstance(data_config['duration_minutes'], int):
+            raise ValueError("data.duration_minutes must be an integer")
+        if data_config['duration_minutes'] <= 0:
+            raise ValueError("data.duration_minutes must be positive")
     
     elif config['mode'] == 'gcp_2019':
         # GCP mode requires processed_dir
         if 'processed_dir' not in data_config:
-            raise ValueError("Missing data.processed_dir for gcp_2019 mode")
+            raise ValueError("Missing required key 'data.processed_dir' in config")
         
         # Validate that processed_dir exists and contains required files
         processed_dir = Path(data_config['processed_dir'])
@@ -102,19 +118,19 @@ def validate_config(config: Dict[str, Any]) -> None:
     ]
     for key in required_sim:
         if key not in sim_config:
-            raise ValueError(f"Missing simulation.{key}")
+            raise ValueError(f"Missing required key 'simulation.{key}' in config")
     
-    # Validate simulation values
-    if sim_config['step_minutes'] <= 0:
-        raise ValueError("simulation.step_minutes must be positive")
-    if sim_config['min_machines'] < 1:
-        raise ValueError("simulation.min_machines must be at least 1")
-    if sim_config['max_machines'] < sim_config['min_machines']:
-        raise ValueError("simulation.max_machines must be >= min_machines")
-    if sim_config['machine_capacity'] <= 0:
-        raise ValueError("simulation.machine_capacity must be positive")
-    if sim_config['cost_per_machine_per_hour'] < 0:
-        raise ValueError("simulation.cost_per_machine_per_hour must be non-negative")
+    # Validate simulation values and types
+    if not isinstance(sim_config['step_minutes'], (int, float)) or sim_config['step_minutes'] <= 0:
+        raise ValueError("simulation.step_minutes must be a positive number")
+    if not isinstance(sim_config['min_machines'], int) or sim_config['min_machines'] < 1:
+        raise ValueError("simulation.min_machines must be an integer >= 1")
+    if not isinstance(sim_config['max_machines'], int) or sim_config['max_machines'] < sim_config['min_machines']:
+        raise ValueError("simulation.max_machines must be an integer >= min_machines")
+    if not isinstance(sim_config['machine_capacity'], (int, float)) or sim_config['machine_capacity'] <= 0:
+        raise ValueError("simulation.machine_capacity must be a positive number")
+    if not isinstance(sim_config['cost_per_machine_per_hour'], (int, float)) or sim_config['cost_per_machine_per_hour'] < 0:
+        raise ValueError("simulation.cost_per_machine_per_hour must be a non-negative number")
     
     # Validate autoscaler config - ALL fields required
     auto_config = config['autoscaler']
@@ -126,38 +142,25 @@ def validate_config(config: Dict[str, Any]) -> None:
     ]
     for key in required_auto:
         if key not in auto_config:
-            raise ValueError(f"Missing autoscaler.{key}")
+            raise ValueError(f"Missing required key 'autoscaler.{key}' in config")
     
-    # Validate threshold values
-    if not (0 < auto_config['upper_threshold'] <= 1):
-        raise ValueError("autoscaler.upper_threshold must be between 0 and 1")
-    if not (0 < auto_config['lower_threshold'] < auto_config['upper_threshold']):
+    # Validate threshold values and types
+    if not isinstance(auto_config['upper_threshold'], (int, float)) or not (0 < auto_config['upper_threshold'] <= 1):
+        raise ValueError("autoscaler.upper_threshold must be a number between 0 and 1")
+    if not isinstance(auto_config['lower_threshold'], (int, float)) or not (0 < auto_config['lower_threshold'] < auto_config['upper_threshold']):
         raise ValueError(
-            "autoscaler.lower_threshold must be between 0 and upper_threshold"
+            "autoscaler.lower_threshold must be a number between 0 and upper_threshold"
         )
-    if auto_config['max_scale_per_step'] < 1:
-        raise ValueError("autoscaler.max_scale_per_step must be at least 1")
-    if auto_config['cooldown_steps'] < 0:
-        raise ValueError("autoscaler.cooldown_steps must be non-negative")
+    if not isinstance(auto_config['max_scale_per_step'], int) or auto_config['max_scale_per_step'] < 1:
+        raise ValueError("autoscaler.max_scale_per_step must be an integer >= 1")
+    if not isinstance(auto_config['cooldown_steps'], int) or auto_config['cooldown_steps'] < 0:
+        raise ValueError("autoscaler.cooldown_steps must be a non-negative integer")
     
     # Validate output section
     if 'directory' not in config['output']:
-        raise ValueError("Missing output.directory")
-
-
-def get_default_config() -> Dict[str, Any]:
-    """
-    PRODUCTION MODE: Default configurations are not allowed.
+        raise ValueError("Missing required key 'output.directory' in config")
+    if not isinstance(config['output']['directory'], str):
+        raise ValueError("output.directory must be a string")
     
-    All configuration must be explicit and provided via YAML files.
-    This prevents silent failures and hidden assumptions.
-    
-    Raises:
-        RuntimeError: Always, as default configs are forbidden in production
-    """
-    raise RuntimeError(
-        "Default configuration is not allowed in production mode.\n"
-        "Please provide an explicit configuration file via --config flag.\n"
-        "See config/baseline.yaml for an example."
-    )
+    return config
 
