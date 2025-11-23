@@ -16,7 +16,7 @@ class ProactiveAutoscalerConfig:
     safety_margin: float = 1.10
     cooldown_steps: int = 3
     max_scale_per_step: int = 3
-    history_window: int = 200  # number of recent steps to use for forecasting
+    history_window: int = 30  # number of recent steps to use for forecasting
 
 
 class ProactiveAutoscaler:
@@ -93,7 +93,7 @@ class ProactiveAutoscaler:
         if not isinstance(self.safety_margin, (int, float)) or self.safety_margin < 1.0:
             raise ValueError("safety_margin must be a number >= 1.0")
         
-        self.history_window = autoscaler_config.get('history_window', 200)
+        self.history_window = autoscaler_config.get('history_window', 30)
         if not isinstance(self.history_window, int) or self.history_window < 20:
             raise ValueError("history_window must be an integer >= 20")
         
@@ -139,7 +139,7 @@ class ProactiveAutoscaler:
             return 0
         
         # If no history provided or not enough history, fall back to reactive behavior
-        if history_df is None or len(history_df) < 20:
+        if history_df is None or len(history_df) < self.history_window:
             # Reactive fallback (same as baseline)
             if utilization > self.upper_threshold:
                 if steps_since_scale_up >= self.cooldown_steps:
@@ -156,10 +156,13 @@ class ProactiveAutoscaler:
         # Clip history window
         history_window = history_df.tail(self.history_window)
         
-        # Forecast future CPU demand
+        # Forecast future CPU demand using forward horizon
         try:
             forecast = self.forecast_model.multi_horizon(history_window)
-            next_cpu = forecast["t+1"] * self.safety_margin
+            seq = forecast["full"]
+            
+            # Use horizon-max for better anticipation (first 3 steps only)
+            horizon_cpu = max(seq[0:3]) * self.safety_margin
         except Exception as e:
             # If forecasting fails, fall back to reactive behavior
             print(f"Warning: Forecasting failed ({e}), using reactive policy")
@@ -178,31 +181,33 @@ class ProactiveAutoscaler:
         # Calculate machine capacity (demand is max of CPU and memory)
         machine_capacity = current_capacity / max(current_machines, 1)
         
-        # Calculate projected utilization
-        projected_util = next_cpu / max(current_capacity, 1e-6)
+        # Calculate projected utilization using horizon forecast
+        projected_util = horizon_cpu / max(current_capacity, 1e-6)
         
         scale_delta = 0
         
-        if projected_util > self.upper_threshold:
-            # Scale up proactively
-            desired_machines = int(
-                max(
-                    current_machines + 1,
-                    np.ceil(next_cpu / machine_capacity),
-                )
-            )
+        if projected_util >= self.upper_threshold:
+            # Scale up proactively based on horizon forecast
+            desired_machines = int(np.ceil(horizon_cpu / machine_capacity))
+            
+            # Ensure at least +1 and obey max per step
             delta = desired_machines - current_machines
-            delta = max(1, min(delta, self.max_scale_per_step))
+            if delta > 0:
+                delta = min(delta, self.max_scale_per_step)
             scale_delta = delta
             
-        elif projected_util < self.lower_threshold:
-            # Scale down proactively
+        elif projected_util <= self.lower_threshold:
+            # Scale down less aggressively
             desired_machines = max(
                 self.min_machines,
-                int(np.floor(next_cpu / machine_capacity)),
+                int(np.ceil(horizon_cpu / machine_capacity))
             )
+            
             delta = desired_machines - current_machines
-            delta = min(-1, max(delta, -self.max_scale_per_step))
+            
+            if delta < 0:
+                delta = max(delta, -self.max_scale_per_step)
+            
             scale_delta = delta
         
         # Clamp to bounds

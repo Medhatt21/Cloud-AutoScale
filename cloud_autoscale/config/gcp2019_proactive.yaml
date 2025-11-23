@@ -39,20 +39,20 @@ autoscaler:
   type: "proactive"
   
   # Scale up when utilization exceeds this threshold
-  upper_threshold: 0.8
+  upper_threshold: 0.75
   
   # Scale down when utilization falls below this threshold
-  lower_threshold: 0.4
+  lower_threshold: 0.45
   
   # Maximum machines to add/remove per scaling action
-  max_scale_per_step: 10
+  max_scale_per_step: 25
   
   # Cooldown period in time steps (to prevent thrashing)
-  cooldown_steps: 3
+  cooldown_steps: 1
   
   # Proactive autoscaler parameters
-  safety_margin: 1.10          # Add 10% safety margin to forecasts
-  history_window: 200          # Number of recent steps for forecasting
+  safety_margin: 1.25          # Add 25% safety margin to forecasts
+  history_window: 30           # Number of recent steps for forecasting
   model_run_dir: "latest"      # Use "latest" to auto-detect, or specify path like "results/run_20251123_175247"
 
 # Output configuration
