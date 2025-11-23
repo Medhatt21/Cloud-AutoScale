@@ -10,16 +10,41 @@ PatternType = Literal["periodic", "bursty", "random_walk", "spike"]
 class SyntheticLoader:
     """Generate synthetic demand patterns for autoscaling simulation."""
     
-    def __init__(self, pattern: PatternType = "periodic", duration_minutes: int = 60, step_minutes: int = 5, seed: int = 42):
+    def __init__(
+        self,
+        pattern: PatternType,
+        duration_minutes: int,
+        step_minutes: int,
+        seed: int = 42
+    ):
         """
         Initialize synthetic data loader.
         
+        Production requirement: All parameters must be explicitly provided.
+        No default values for pattern, duration, or step_minutes.
+        
         Args:
             pattern: Type of demand pattern to generate
+                     ('periodic', 'bursty', 'random_walk', 'spike')
             duration_minutes: Total duration of simulation in minutes
             step_minutes: Time step size in minutes
-            seed: Random seed for reproducibility
+            seed: Random seed for reproducibility (default: 42)
+        
+        Raises:
+            ValueError: If pattern is invalid
         """
+        valid_patterns = ["periodic", "bursty", "random_walk", "spike"]
+        if pattern not in valid_patterns:
+            raise ValueError(
+                f"Invalid pattern: '{pattern}'. Must be one of {valid_patterns}"
+            )
+        
+        if duration_minutes <= 0:
+            raise ValueError("duration_minutes must be positive")
+        
+        if step_minutes <= 0:
+            raise ValueError("step_minutes must be positive")
+        
         self.pattern = pattern
         self.duration_minutes = duration_minutes
         self.step_minutes = step_minutes

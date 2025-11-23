@@ -23,6 +23,7 @@ dependencies = [
     "pyarrow>=22.0.0",
     "jupyter>=1.1.1",
     "nbconvert>=7.16.6",
+    "statsmodels>=0.14.5",
 ]
 
 [project.optional-dependencies]

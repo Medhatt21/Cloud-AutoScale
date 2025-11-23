@@ -82,8 +82,9 @@ def run_simulation(args):
     print("📊 Loading demand data...")
     try:
         if config['mode'] == 'synthetic':
-            pattern = config['data'].get('synthetic_pattern', 'periodic')
-            duration = config['data'].get('duration_minutes', 60)
+            # Strict access - no defaults
+            pattern = config['data']['synthetic_pattern']
+            duration = config['data']['duration_minutes']
             step = config['simulation']['step_minutes']
             
             loader = SyntheticLoader(
@@ -95,21 +96,27 @@ def run_simulation(args):
             print(f"   Duration: {duration} minutes")
             
         elif config['mode'] == 'gcp_2019':
-            data_path = config['data']['path']
-            duration = config['data'].get('duration_minutes', 60)
+            # Use processed_dir instead of raw path
+            processed_dir = config['data']['processed_dir']
             step = config['simulation']['step_minutes']
             
+            # Duration is optional for GCP mode (use all available data if not specified)
+            duration = config['data'].get('duration_minutes')  # Can be None
+            
             loader = GCP2019Loader(
-                data_path=data_path,
-                duration_minutes=duration,
-                step_minutes=step
+                processed_dir=processed_dir,
+                step_minutes=step,
+                duration_minutes=duration
             )
-            print(f"   Data path: {data_path}")
-            print(f"   Duration: {duration} minutes")
+            print(f"   Processed data: {processed_dir}")
+            if duration:
+                print(f"   Duration limit: {duration} minutes")
+            else:
+                print(f"   Duration: Using all available data")
         
         else:
-            print(f"❌ Unknown mode: {config['mode']}")
-            sys.exit(1)
+            # This should never happen if config validation works
+            raise ValueError(f"Invalid mode: {config['mode']}")
         
         demand_df = loader.load()
         print(f"   ✓ Loaded {len(demand_df)} time steps")

@@ -12,11 +12,21 @@ class CloudSimulator:
         """
         Initialize simulator.
         
+        Production requirement: All configuration must be explicit.
+        No default values are provided. Missing fields will raise KeyError.
+        
         Args:
             config: Configuration dictionary with simulation parameters
+                    Required keys: step_minutes, min_machines, max_machines,
+                                 machine_capacity, cost_per_machine_per_hour
+        
+        Raises:
+            KeyError: If required configuration keys are missing
         """
         self.config = config
-        self.step_minutes = config.get('step_minutes', 5)
+        
+        # Strict access - will raise KeyError if missing
+        self.step_minutes = config['step_minutes']
         
         # State
         self.current_capacity = 0
@@ -46,9 +56,9 @@ class CloudSimulator:
         Returns:
             Dictionary with simulation results
         """
-        # Initialize with minimum capacity
-        min_machines = self.config.get('min_machines', 1)
-        machine_capacity = self.config.get('machine_capacity', 10)  # units per machine
+        # Initialize with minimum capacity - strict access, no defaults
+        min_machines = self.config['min_machines']
+        machine_capacity = self.config['machine_capacity']
         
         self.current_machines = min_machines
         self.current_capacity = self.current_machines * machine_capacity
@@ -86,8 +96,8 @@ class CloudSimulator:
                 old_machines = self.current_machines
                 self.current_machines += scaling_action
                 
-                # Enforce limits
-                max_machines = self.config.get('max_machines', 100)
+                # Enforce limits - strict access, no defaults
+                max_machines = self.config['max_machines']
                 self.current_machines = max(min_machines, min(self.current_machines, max_machines))
                 
                 # Update capacity
@@ -104,7 +114,8 @@ class CloudSimulator:
                     })
             
             # Calculate cost (simple: cost per machine per time step)
-            cost_per_machine_per_hour = self.config.get('cost_per_machine_per_hour', 0.1)
+            # Strict access - no defaults
+            cost_per_machine_per_hour = self.config['cost_per_machine_per_hour']
             step_cost = self.current_machines * cost_per_machine_per_hour * (self.step_minutes / 60)
             self.total_cost += step_cost
             

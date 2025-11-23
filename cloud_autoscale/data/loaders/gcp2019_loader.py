@@ -1,187 +1,149 @@
-"""GCP 2019 trace data loader.
+"""GCP 2019 trace data loader - Production version.
 
-This loader expects data to be downloaded externally using the provided scripts.
-It reads JSONL.gz files and aggregates them into 5-minute time buckets.
+This loader reads pre-processed Parquet files from data/processed/.
+It does NOT read raw JSONL files or generate synthetic fallbacks.
+All data must be prepared beforehand using the data processing pipeline.
 """
 
-import gzip
-import json
 from pathlib import Path
 from typing import Optional
 import pandas as pd
-import numpy as np
+
+try:
+    import polars as pl
+    HAS_POLARS = True
+except ImportError:
+    HAS_POLARS = False
 
 
 class GCP2019Loader:
-    """Load and process GCP 2019 trace data."""
+    """Load pre-processed GCP 2019 trace data from Parquet files."""
     
-    def __init__(self, data_path: str, duration_minutes: int = 60, step_minutes: int = 5):
+    def __init__(
+        self,
+        processed_dir: str | Path,
+        step_minutes: int,
+        duration_minutes: Optional[int] = None
+    ):
         """
         Initialize GCP 2019 data loader.
         
-        Args:
-            data_path: Path to directory containing instance_usage-*.json.gz and machine_events-*.json.gz
-            duration_minutes: Total duration to load in minutes
-            step_minutes: Time bucket size in minutes
-        """
-        self.data_path = Path(data_path)
-        self.duration_minutes = duration_minutes
-        self.step_minutes = step_minutes
+        This loader expects processed Parquet files in the specified directory:
+        - cluster_level.parquet (required)
+        - machine_level.parquet (optional, not used by this loader)
         
-        if not self.data_path.exists():
-            raise ValueError(f"Data path does not exist: {self.data_path}")
+        Args:
+            processed_dir: Path to directory containing processed Parquet files
+            step_minutes: Time bucket size in minutes
+            duration_minutes: Optional duration limit in minutes (None = use all data)
+        
+        Raises:
+            ValueError: If processed_dir doesn't exist or required files are missing
+        """
+        self.processed_dir = Path(processed_dir)
+        self.step_minutes = step_minutes
+        self.duration_minutes = duration_minutes
+        
+        # Validate directory exists
+        if not self.processed_dir.exists():
+            raise ValueError(
+                f"Processed data directory does not exist: {self.processed_dir}\n"
+                f"Please run the data processing pipeline first."
+            )
+        
+        # Validate required file exists
+        self.cluster_file = self.processed_dir / 'cluster_level.parquet'
+        if not self.cluster_file.exists():
+            raise ValueError(
+                f"Required file not found: {self.cluster_file}\n"
+                f"Please ensure the data processing pipeline has been run."
+            )
     
     def load(self) -> pd.DataFrame:
         """
-        Load and aggregate GCP 2019 trace data.
+        Load and prepare cluster-level demand data.
         
         Returns:
             DataFrame with columns: time, cpu_demand, mem_demand, new_instances
+            - time: Time in minutes (float)
+            - cpu_demand: CPU demand in cores (float)
+            - mem_demand: Memory demand in GB (float)
+            - new_instances: Number of new instances created (int)
+        
+        Raises:
+            ValueError: If data cannot be loaded or is malformed
         """
-        # Find instance usage files
-        usage_files = sorted(self.data_path.glob("instance_usage-*.json.gz"))
+        # Load using Polars if available (faster), otherwise Pandas
+        if HAS_POLARS:
+            df = self._load_with_polars()
+        else:
+            df = self._load_with_pandas()
         
-        if not usage_files:
-            # Try CSV format as fallback
-            usage_files = sorted(self.data_path.glob("instance_usage-*.csv"))
-            if not usage_files:
-                raise FileNotFoundError(
-                    f"No instance_usage files found in {self.data_path}. "
-                    "Please download data using the provided scripts."
-                )
-            return self._load_from_csv(usage_files[0])
-        
-        return self._load_from_jsonl_gz(usage_files)
+        return df
     
-    def _load_from_jsonl_gz(self, files: list) -> pd.DataFrame:
-        """Load data from JSONL.gz files."""
-        records = []
+    def _load_with_polars(self) -> pd.DataFrame:
+        """Load data using Polars (faster for large files)."""
+        # Read parquet file
+        df = pl.read_parquet(self.cluster_file)
         
-        # Read first file (or multiple if needed)
-        for file_path in files[:1]:  # Process first file for now
-            with gzip.open(file_path, 'rt', encoding='utf-8') as f:
-                for i, line in enumerate(f):
-                    if i >= 10000:  # Limit records for performance
-                        break
-                    
-                    try:
-                        record = json.loads(line)
-                        records.append(record)
-                    except json.JSONDecodeError:
-                        continue
+        # Validate required columns exist
+        required_cols = ['bucket_s', 'cpu_demand', 'mem_demand', 'new_instances_cluster']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(
+                f"Missing required columns in {self.cluster_file}: {missing_cols}\n"
+                f"Available columns: {df.columns}"
+            )
         
-        if not records:
-            raise ValueError("No valid records found in data files")
+        # Convert bucket_s (seconds) to time (minutes)
+        df = df.with_columns([
+            (pl.col('bucket_s') / 60.0).alias('time')
+        ])
         
-        # Convert to DataFrame
-        df = pd.DataFrame(records)
+        # Select and rename columns
+        df = df.select([
+            'time',
+            'cpu_demand',
+            'mem_demand',
+            pl.col('new_instances_cluster').alias('new_instances')
+        ])
         
-        # Extract relevant fields
-        # GCP 2019 schema: timestamp (microseconds), collection_id, instance_index, 
-        # average_usage (cpu, memory)
+        # Sort by time
+        df = df.sort('time')
         
-        if 'start_time' in df.columns:
-            df['time_minutes'] = df['start_time'] / 1_000_000 / 60  # Convert microseconds to minutes
-        elif 'timestamp' in df.columns:
-            df['time_minutes'] = df['timestamp'] / 1_000_000 / 60
-        else:
-            # Generate synthetic timestamps
-            df['time_minutes'] = np.arange(len(df)) * 0.1
+        # Truncate to duration if specified
+        if self.duration_minutes is not None:
+            df = df.filter(pl.col('time') < self.duration_minutes)
         
-        # Extract CPU and memory usage
-        if 'average_usage' in df.columns:
-            # Parse nested average_usage field
-            df['cpu'] = df['average_usage'].apply(lambda x: x.get('cpus', 0.0) if isinstance(x, dict) else 0.0)
-            df['memory'] = df['average_usage'].apply(lambda x: x.get('memory', 0.0) if isinstance(x, dict) else 0.0)
-        else:
-            # Use direct fields if available
-            df['cpu'] = df.get('cpus', 0.0)
-            df['memory'] = df.get('memory', 0.0)
-        
-        # Normalize to 0-100 range (GCP data is typically 0-1)
-        df['cpu'] = df['cpu'] * 100
-        df['memory'] = df['memory'] * 100
-        
-        # Create time buckets
-        df['time_bucket'] = (df['time_minutes'] // self.step_minutes).astype(int)
-        
-        # Aggregate by time bucket
-        aggregated = df.groupby('time_bucket').agg({
-            'cpu': 'mean',
-            'memory': 'mean',
-            'collection_id': 'nunique'  # Count unique instances as new instances
-        }).reset_index()
-        
-        aggregated.columns = ['time_bucket', 'cpu_demand', 'mem_demand', 'new_instances']
-        aggregated['time'] = aggregated['time_bucket'] * self.step_minutes
-        
-        # Ensure we have the requested duration
-        num_steps = self.duration_minutes // self.step_minutes
-        if len(aggregated) < num_steps:
-            # Pad with zeros if needed
-            full_range = pd.DataFrame({
-                'time': np.arange(0, num_steps) * self.step_minutes
-            })
-            aggregated = full_range.merge(aggregated[['time', 'cpu_demand', 'mem_demand', 'new_instances']], 
-                                         on='time', how='left')
-            aggregated = aggregated.fillna(0)
-        else:
-            # Trim if too long
-            aggregated = aggregated[aggregated['time'] < self.duration_minutes]
-        
-        return aggregated[['time', 'cpu_demand', 'mem_demand', 'new_instances']]
+        # Convert to pandas for compatibility with simulator
+        return df.to_pandas()
     
-    def _load_from_csv(self, file_path: Path) -> pd.DataFrame:
-        """Load data from CSV format (fallback)."""
-        # Read CSV file
-        df = pd.read_csv(file_path, nrows=10000)
+    def _load_with_pandas(self) -> pd.DataFrame:
+        """Load data using Pandas (fallback if Polars not available)."""
+        # Read parquet file
+        df = pd.read_parquet(self.cluster_file)
         
-        # Convert timestamp to minutes
-        if 'start_time' in df.columns:
-            df['time_minutes'] = df['start_time'] / 1_000_000 / 60
-        elif 'timestamp' in df.columns:
-            df['time_minutes'] = df['timestamp'] / 1_000_000 / 60
-        else:
-            df['time_minutes'] = np.arange(len(df)) * 0.1
+        # Validate required columns exist
+        required_cols = ['bucket_s', 'cpu_demand', 'mem_demand', 'new_instances_cluster']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(
+                f"Missing required columns in {self.cluster_file}: {missing_cols}\n"
+                f"Available columns: {list(df.columns)}"
+            )
         
-        # Extract CPU and memory
-        cpu_cols = [col for col in df.columns if 'cpu' in col.lower()]
-        mem_cols = [col for col in df.columns if 'mem' in col.lower()]
+        # Convert bucket_s (seconds) to time (minutes)
+        df['time'] = df['bucket_s'] / 60.0
         
-        if cpu_cols:
-            df['cpu'] = df[cpu_cols[0]] * 100
-        else:
-            df['cpu'] = np.random.uniform(10, 50, len(df))
+        # Select and rename columns
+        df = df[['time', 'cpu_demand', 'mem_demand', 'new_instances_cluster']].copy()
+        df.rename(columns={'new_instances_cluster': 'new_instances'}, inplace=True)
         
-        if mem_cols:
-            df['memory'] = df[mem_cols[0]] * 100
-        else:
-            df['memory'] = np.random.uniform(10, 50, len(df))
+        # Sort by time
+        df = df.sort_values('time').reset_index(drop=True)
         
-        # Create time buckets
-        df['time_bucket'] = (df['time_minutes'] // self.step_minutes).astype(int)
+        # Truncate to duration if specified
+        if self.duration_minutes is not None:
+            df = df[df['time'] < self.duration_minutes].reset_index(drop=True)
         
-        # Aggregate
-        aggregated = df.groupby('time_bucket').agg({
-            'cpu': 'mean',
-            'memory': 'mean'
-        }).reset_index()
-        
-        aggregated.columns = ['time_bucket', 'cpu_demand', 'mem_demand']
-        aggregated['time'] = aggregated['time_bucket'] * self.step_minutes
-        aggregated['new_instances'] = np.random.poisson(2, len(aggregated))
-        
-        # Ensure duration
-        num_steps = self.duration_minutes // self.step_minutes
-        if len(aggregated) < num_steps:
-            full_range = pd.DataFrame({
-                'time': np.arange(0, num_steps) * self.step_minutes
-            })
-            aggregated = full_range.merge(aggregated[['time', 'cpu_demand', 'mem_demand', 'new_instances']], 
-                                         on='time', how='left')
-            aggregated = aggregated.fillna(0)
-        else:
-            aggregated = aggregated[aggregated['time'] < self.duration_minutes]
-        
-        return aggregated[['time', 'cpu_demand', 'mem_demand', 'new_instances']]
-
+        return df

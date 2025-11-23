@@ -10,18 +10,31 @@ class BaselineAutoscaler:
         """
         Initialize baseline autoscaler.
         
+        Production requirement: All configuration must be explicit.
+        No default values are provided. Missing fields will raise KeyError.
+        
         Args:
             config: Configuration with thresholds and cooldown periods
-        """
-        self.upper_threshold = config.get('upper_threshold', 0.7)
-        self.lower_threshold = config.get('lower_threshold', 0.3)
-        self.max_scale_per_step = config.get('max_scale_per_step', 1)
-        self.cooldown_steps = config.get('cooldown_steps', 2)
+                    Required keys: upper_threshold, lower_threshold,
+                                 max_scale_per_step, cooldown_steps, step_minutes
         
-        # State
+        Raises:
+            KeyError: If required configuration keys are missing
+        """
+        # Strict access - will raise KeyError if missing
+        self.upper_threshold = config['upper_threshold']
+        self.lower_threshold = config['lower_threshold']
+        self.max_scale_per_step = config['max_scale_per_step']
+        self.cooldown_steps = config['cooldown_steps']
+        self.step_minutes = config['step_minutes']
+        
+        # Defensive validation (config should already be validated, but double-check)
+        assert 0 < self.lower_threshold < self.upper_threshold <= 1, \
+            f"Invalid thresholds: lower={self.lower_threshold}, upper={self.upper_threshold}"
+        
+        # State (internal, not config)
         self.last_scale_up_time = -999
         self.last_scale_down_time = -999
-        self.step_minutes = config.get('step_minutes', 5)
     
     def decide(self, current_capacity: float, current_machines: int, 
                demand: float, utilization: float, time: float) -> int:
