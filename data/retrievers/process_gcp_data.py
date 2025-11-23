@@ -1,38 +1,38 @@
 #!/usr/bin/env python3
 """
-Production-grade GCP 2019 processing pipeline.
+Production-grade GCP 2019 processing pipeline (final version).
 
-Features:
-- Parallel parsing of .json.gz files using Polars NDJSON lazy scanner
-- GZIP corruption detection
-- Polars fast processing (vectorized + memory-efficient)
-- Accurate midpoint bucketing
-- Machine REMOVE event handling
-- Progress bars for: loading, parsing, aggregation
-- No absolute paths (portable across machines)
-
-OUTPUT:
-    data/processed/machine_level.parquet
-    data/processed/cluster_level.parquet
+Key Features
+------------
+- Parses NDJSON.gz using Polars lazy API
+- Handles corrupted or partial shards
+- Inference of machine CPU & Memory capacity via P99 usage
+- Capacity rounded to realistic machine types
+- Handles instance_events shards missing machine_id cleanly
+- 5-minute bucketing using job midpoint
+- Warning-free (no polars deprecation warnings)
 """
+
 import warnings
 import sys
+import os
+import gzip
+import argparse
+from glob import glob
+import polars as pl
+from tqdm import tqdm
 
-# macOS-only: silence false multiprocessing semaphore warnings
+
+# ============================================================
+# macOS warnings fix
+# ============================================================
+
 if sys.platform == "darwin":
     warnings.filterwarnings(
         "ignore",
         message="resource_tracker: There appear to be",
         category=UserWarning,
     )
-import os
-import gzip
-import argparse
-from glob import glob
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import polars as pl
-from tqdm import tqdm
 
 
 # ============================================================
@@ -40,7 +40,6 @@ from tqdm import tqdm
 # ============================================================
 
 def is_valid_gz(path: str) -> bool:
-    """Check if .json.gz is readable and non-trivial."""
     try:
         if os.path.getsize(path) < 200:
             return False
@@ -56,387 +55,302 @@ def is_valid_gz(path: str) -> bool:
 
 
 def list_valid_files(folder: str) -> list[str]:
-    """Return sorted list of valid (non-corrupted) gzip files."""
     paths = sorted(glob(os.path.join(folder, "*.json.gz")))
-    valid = []
-    for p in paths:
-        if is_valid_gz(p):
-            valid.append(p)
-        else:
-            print(f"⚠️ Skipping corrupted file: {p}")
-    return valid
+    return [p for p in paths if is_valid_gz(p)]
 
 
 # ============================================================
-# Polars-friendly file parsers (lazy NDJSON)
+# Parsers
 # ============================================================
 
-def parse_usage_file(path: str, max_lines: int | None):
-    """
-    Parse instance_usage NDJSON.gz into a Polars DataFrame.
-
-    Google 2019 v3 schema: average_usage is a struct:
-      average_usage: { cpus: float, memory: float }
-
-    We expose:
-      start_time, end_time, machine_id, collection_id, instance_index,
-      cpu_rate (from average_usage.cpus),
-      mem_usage (from average_usage.memory)
-    """
+def parse_usage_file(path: str, max_lines=None):
     lf = pl.scan_ndjson(path)
 
-    # Avoid PerformanceWarning: use collect_schema() instead of lf.columns
     schema = lf.collect_schema()
     names = set(schema.names())
 
-    has_avg = "average_usage" in names
-
-    if has_avg:
+    # Extract average_usage struct if present
+    if "average_usage" in names:
         lf = lf.with_columns(
-            pl.col("average_usage").struct.field("cpus")
-            .cast(pl.Float64)
-            .alias("cpu_rate"),
-
-            pl.col("average_usage").struct.field("memory")
-            .cast(pl.Float64)
-            .alias("mem_usage"),
+            pl.col("average_usage").struct.field("cpus").cast(pl.Float64).alias("cpu_rate"),
+            pl.col("average_usage").struct.field("memory").cast(pl.Float64).alias("mem_usage"),
         )
     else:
         lf = lf.with_columns(
-            pl.lit(None, dtype=pl.Float64).alias("cpu_rate"),
-            pl.lit(None, dtype=pl.Float64).alias("mem_usage"),
+            pl.lit(None, pl.Float64).alias("cpu_rate"),
+            pl.lit(None, pl.Float64).alias("mem_usage"),
         )
 
     lf = lf.select(
-        [
-            pl.col("start_time").cast(pl.Float64).alias("start_time"),
-            pl.col("end_time").cast(pl.Float64).alias("end_time"),
-            pl.col("machine_id").cast(pl.Int64).alias("machine_id"),
-            pl.col("collection_id").cast(pl.Int64).alias("collection_id"),
-            pl.col("instance_index").cast(pl.Int64).alias("instance_index"),
-            pl.col("cpu_rate"),
-            pl.col("mem_usage"),
-        ]
+        pl.col("start_time").cast(pl.Float64),
+        pl.col("end_time").cast(pl.Float64),
+        pl.col("machine_id").cast(pl.Int64),
+        pl.col("collection_id").cast(pl.Int64),
+        pl.col("instance_index").cast(pl.Int64),
+        pl.col("cpu_rate"),
+        pl.col("mem_usage"),
     )
 
     if max_lines:
         lf = lf.slice(0, max_lines)
 
-    df = lf.collect()
-    return df
+    return lf.collect()
 
 
-def parse_instance_events_file(path: str, max_lines: int | None):
-    """
-    Parse instance_events NDJSON.gz into a Polars DataFrame.
-
-    Expected fields:
-      time, type, machine_id, collection_id, instance_index,
-      resource_request: { cpus: float, memory: float }
-    """
+def parse_instance_events_file(path: str, max_lines=None):
     lf = pl.scan_ndjson(path)
 
     schema = lf.collect_schema()
     names = set(schema.names())
-    has_rr = "resource_request" in names
 
-    if has_rr:
+    # Extract resource_request if present
+    if "resource_request" in names:
         lf = lf.with_columns(
             pl.col("resource_request").struct.field("cpus")
-            .cast(pl.Float64)
-            .alias("req_cpus"),
+                .cast(pl.Float64).alias("req_cpus"),
             pl.col("resource_request").struct.field("memory")
-            .cast(pl.Float64)
-            .alias("req_memory"),
+                .cast(pl.Float64).alias("req_memory"),
         )
     else:
         lf = lf.with_columns(
-            pl.lit(None, dtype=pl.Float64).alias("req_cpus"),
-            pl.lit(None, dtype=pl.Float64).alias("req_memory"),
+            pl.lit(None, pl.Float64).alias("req_cpus"),
+            pl.lit(None, pl.Float64).alias("req_memory"),
         )
 
+    # Ensure machine_id always exists (as null if missing)
+    if "machine_id" not in names:
+        lf = lf.with_columns(pl.lit(None, pl.Int64).alias("machine_id"))
+
     lf = lf.select(
-        [
-            pl.col("time").cast(pl.Float64).alias("time"),
-            pl.col("type").cast(pl.Int64).alias("type"),
-            pl.col("machine_id").cast(pl.Int64).alias("machine_id"),
-            pl.col("collection_id").cast(pl.Int64).alias("collection_id"),
-            pl.col("instance_index").cast(pl.Int64).alias("instance_index"),
-            pl.col("req_cpus"),
-            pl.col("req_memory"),
-        ]
+        pl.col("time").cast(pl.Float64),
+        pl.col("type").cast(pl.Int64),
+        pl.col("machine_id").cast(pl.Int64),
+        pl.col("collection_id").cast(pl.Int64),
+        pl.col("instance_index").cast(pl.Int64),
+        pl.col("req_cpus"),
+        pl.col("req_memory"),
     )
 
     if max_lines:
         lf = lf.slice(0, max_lines)
 
-    df = lf.collect()
-    return df
+    return lf.collect()
 
 
-def parse_machine_events_file(path: str, max_lines: int | None):
+def parse_machine_events_file(path: str, max_lines=None):
     """
-    Parse machine_events NDJSON.gz into a Polars DataFrame.
-
-    Expected fields:
-      time, type, machine_id, cpu_capacity, memory_capacity, platform_id, clock_rate
+    Note: machine_events in v3 dataset lacks capacity info entirely.
+    Only machine_id and REMOVE events are useful.
     """
     lf = pl.scan_ndjson(path)
 
     lf = lf.select(
-        [
-            pl.col("time").cast(pl.Float64).alias("time"),
-            pl.col("type").cast(pl.Int64).alias("type"),
-            pl.col("machine_id").cast(pl.Int64).alias("machine_id"),
-            pl.col("cpu_capacity").cast(pl.Float64).alias("cpu_capacity"),
-            pl.col("memory_capacity").cast(pl.Float64).alias("memory_capacity"),
-            pl.col("platform_id").cast(pl.Int64).alias("platform_id"),
-            pl.col("clock_rate").cast(pl.Float64).alias("clock_rate"),
-        ]
+        pl.col("time").cast(pl.Float64),
+        pl.col("type").cast(pl.Int64),
+        pl.col("machine_id").cast(pl.Int64),
     )
 
     if max_lines:
         lf = lf.slice(0, max_lines)
 
-    df = lf.collect()
-    return df
+    return lf.collect()
 
 
 # ============================================================
-# Master parallel loader
+# Loader
 # ============================================================
 
-def load_parallel(folder: str, parser_fn, max_files=None, max_lines=None, desc="Loading"):
+def load_sequential(folder, parser_fn, max_files=None, max_lines=None, desc="Loading"):
     files = list_valid_files(folder)
-    if not files:
-        print(f"⚠️ No valid files found in {folder}")
-        return None
-
     if max_files:
         files = files[:max_files]
 
-    print(f"📂 {desc}: {len(files)} files from {folder}")
+    print(f"📂 {desc}: {len(files)} files")
+    dfs = []
 
-    results = []
+    for f in tqdm(files, desc=desc, unit="file"):
+        try:
+            df = parser_fn(f, max_lines)
+            if df.height > 0:
+                dfs.append(df)
+        except Exception as e:
+            print(f"❌ Error parsing {f}: {e}")
+            raise
 
-    # Avoid oversubscribing the CPU: cap at 8 workers by default
-    max_workers = min(os.cpu_count() or 4, len(files), 8)
+    return pl.concat(dfs, how="diagonal")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(parser_fn, path, max_lines) for path in files]
 
-        for fut in tqdm(
-            as_completed(futures),
-            total=len(futures),
-            desc=desc,
-            unit="file",
-        ):
-            df = fut.result()
-            if df is not None and df.height > 0:
-                results.append(df)
+# ============================================================
+# Capacity Inference
+# ============================================================
 
-    if not results:
-        return None
+def round_cpu(x: float) -> int:
+    if x < 1: return 1
+    if x < 2: return 2
+    if x < 4: return 4
+    if x < 8: return 8
+    if x < 16: return 16
+    if x < 32: return 32
+    return int(round(x))
 
-    return pl.concat(results, how="diagonal")
+
+def round_mem_gb(x_mb: float) -> int:
+    gb = x_mb / 1024
+    if gb < 1: return 1
+    if gb < 4: return 4
+    if gb < 8: return 8
+    if gb < 16: return 16
+    if gb < 32: return 32
+    if gb < 64: return 64
+    if gb < 128: return 128
+    return int(round(gb))
+
+
+def infer_machine_capacity_from_usage(usage: pl.DataFrame):
+    print("🧮 Inferring machine capacity from P99 usage...")
+
+    caps = (
+        usage
+        .group_by("machine_id")
+        .agg([
+            pl.quantile("cpu_rate", 0.99).alias("cpu_p99"),
+            pl.quantile("mem_usage", 0.99).alias("mem_p99"),
+        ])
+        .with_columns([
+            pl.col("cpu_p99").map_elements(round_cpu).alias("cpu_capacity"),
+            pl.col("mem_p99").map_elements(lambda x: round_mem_gb(x) * 1024).alias("memory_capacity"),
+        ])
+        .select(["machine_id", "cpu_capacity", "memory_capacity"])
+    )
+
+    print(f"✔ Inferred capacity for {caps.height} machines")
+    return caps
 
 
 # ============================================================
 # Aggregations
 # ============================================================
 
-def summarize_machine_capacity(machine_events: pl.DataFrame) -> pl.DataFrame:
-    print("🧮 Summarizing machine capacities...")
-
-    me = machine_events.with_columns(
-        [
-            pl.when(pl.col("type") == 1)  # 1 == REMOVE in GCP traces
-            .then(0)
-            .otherwise(pl.col("cpu_capacity"))
-            .alias("cpu_capacity_clean"),
-
-            pl.when(pl.col("type") == 1)
-            .then(0)
-            .otherwise(pl.col("memory_capacity"))
-            .alias("memory_capacity_clean"),
-        ]
-    )
-
-    caps = (
-        me.group_by("machine_id")
-        .agg(
-            [
-                pl.max("cpu_capacity_clean").alias("cpu_capacity"),
-                pl.max("memory_capacity_clean").alias("memory_capacity"),
-                pl.max("platform_id").alias("platform_id"),
-                pl.max("clock_rate").alias("clock_rate"),
-            ]
-        )
-    )
-
-    print(f"✔ Machine types detected: {caps.height}")
-    return caps
-
-
-def build_machine_level(usage: pl.DataFrame, caps: pl.DataFrame, events: pl.DataFrame | None):
+def build_machine_level(usage, caps, events):
     print("🧮 Building machine-level dataset...")
 
-    # Midpoint time in seconds, bucketed into 5-min (300s) windows
     usage = usage.with_columns(
         ((pl.col("start_time") + pl.col("end_time")) / 2 / 1e6).alias("mid_s")
     ).with_columns(
         (pl.col("mid_s") // 300 * 300).alias("bucket_s")
     )
 
-    usage_agg = (
+    agg = (
         usage.group_by(["bucket_s", "machine_id"])
-        .agg(
-            [
-                pl.sum("cpu_rate").alias("cpu_used"),
-                pl.sum("mem_usage").alias("mem_used"),
-                pl.count().alias("num_records"),
-                pl.n_unique("collection_id").alias("unique_jobs"),
-                pl.n_unique("instance_index").alias("unique_instances"),
-            ]
-        )
+        .agg([
+            pl.sum("cpu_rate").alias("cpu_used"),
+            pl.sum("mem_usage").alias("mem_used"),
+            pl.len().alias("num_records"),
+        ])
         .sort(["bucket_s", "machine_id"])
     )
 
-    # Join with capacities
-    machine_level = usage_agg.join(caps, on="machine_id", how="left")
+    ml = agg.join(caps, on="machine_id", how="left")
 
-    # Per-machine instance events (starts) per bucket
-    if events is not None and "time" in events.columns:
-        ev = events.with_columns(
-            (pl.col("time") / 1e6 // 300 * 300).alias("bucket_s")
-        )
-        ev_agg = (
-            ev.group_by(["bucket_s", "machine_id"])
-            .agg(pl.count().alias("new_instances_machine"))
-        )
-        machine_level = machine_level.join(ev_agg, on=["bucket_s", "machine_id"], how="left")
-        machine_level = machine_level.with_columns(
-            pl.col("new_instances_machine").fill_null(0)
-        )
-    else:
-        machine_level = machine_level.with_columns(
-            pl.lit(0).alias("new_instances_machine")
-        )
-
-    # Utilization
-    machine_level = machine_level.with_columns(
-        [
-            (pl.col("cpu_used") / pl.col("cpu_capacity")).alias("utilization_cpu"),
-            (pl.col("mem_used") / pl.col("memory_capacity")).alias("utilization_mem"),
-        ]
+    # Machine-level event counts (only events with machine_id)
+    ev = (
+        events
+        .filter(pl.col("machine_id").is_not_null())
+        .with_columns((pl.col("time") / 1e6 // 300 * 300).alias("bucket_s"))
+    )
+    evc = ev.group_by(["bucket_s", "machine_id"]).agg(
+        pl.len().alias("new_instances_machine")
     )
 
-    return machine_level
+    ml = ml.join(evc, on=["bucket_s", "machine_id"], how="left")
+    ml = ml.with_columns(pl.col("new_instances_machine").fill_null(0))
+
+    ml = ml.with_columns([
+        (pl.col("cpu_used") / pl.col("cpu_capacity")).alias("util_cpu"),
+        (pl.col("mem_used") / pl.col("memory_capacity")).alias("util_mem"),
+    ])
+
+    return ml
 
 
-def build_cluster_level(machine: pl.DataFrame, events: pl.DataFrame | None):
+def build_cluster_level(machine, events):
     print("🧮 Building cluster-level dataset...")
 
     cluster = (
         machine.group_by("bucket_s")
-        .agg(
-            [
-                pl.sum("cpu_used").alias("cpu_demand"),
-                pl.sum("mem_used").alias("mem_demand"),
-                pl.sum("cpu_capacity").alias("cpu_capacity"),
-                pl.sum("memory_capacity").alias("mem_capacity"),
-                pl.n_unique("machine_id").alias("machines"),
-                pl.mean("utilization_cpu").alias("avg_utilization_cpu"),
-                pl.mean("utilization_mem").alias("avg_utilization_mem"),
-            ]
-        )
-        .sort("bucket_s")
+        .agg([
+            pl.sum("cpu_used").alias("cpu_demand"),
+            pl.sum("mem_used").alias("mem_demand"),
+            pl.sum("cpu_capacity").alias("cpu_capacity"),
+            pl.sum("memory_capacity").alias("mem_capacity"),
+            pl.n_unique("machine_id").alias("machines"),
+            pl.mean("util_cpu").alias("avg_util_cpu"),
+            pl.mean("util_mem").alias("avg_util_mem"),
+        ])
     )
 
-    if events is not None and "time" in events.columns:
-        ev = events.with_columns(
-            (pl.col("time") / 1e6 // 300 * 300).alias("bucket_s")
-        )
-        evc = ev.group_by("bucket_s").agg(pl.count().alias("new_instances_cluster"))
-        cluster = cluster.join(evc, on="bucket_s", how="left")
-        cluster = cluster.with_columns(
-            pl.col("new_instances_cluster").fill_null(0)
-        )
-    else:
-        cluster = cluster.with_columns(
-            pl.lit(0).alias("new_instances_cluster")
-        )
+    ev = events.with_columns(
+        (pl.col("time") / 1e6 // 300 * 300).alias("bucket_s")
+    )
+    evc = ev.group_by("bucket_s").agg(pl.len().alias("new_instances_cluster"))
+
+    cluster = cluster.join(evc, on="bucket_s", how="left")
+    cluster = cluster.with_columns(pl.col("new_instances_cluster").fill_null(0))
 
     return cluster
 
 
 # ============================================================
-# Main
+# MAIN
 # ============================================================
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw_dir", type=str, default="data/raw")
     parser.add_argument("--out_dir", type=str, default="data/processed")
-
     parser.add_argument("--max_files_usage", type=int, default=None)
     parser.add_argument("--max_files_events", type=int, default=None)
     parser.add_argument("--max_files_machines", type=int, default=None)
     parser.add_argument("--max_lines_per_file", type=int, default=None)
-
     args = parser.parse_args()
 
-    usage_dir = os.path.join(args.raw_dir, "instance_usage")
-    events_dir = os.path.join(args.raw_dir, "instance_events")
-    machines_dir = os.path.join(args.raw_dir, "machine_events")
-
-    os.makedirs(args.out_dir, exist_ok=True)
-
-    print("\n=== 🚀 Loading Google Traces in Parallel ===")
-
-    instance_usage = load_parallel(
-        usage_dir,
+    usage = load_sequential(
+        os.path.join(args.raw_dir, "instance_usage"),
         parse_usage_file,
-        max_files=args.max_files_usage,
-        max_lines=args.max_lines_per_file,
-        desc="instance_usage",
+        args.max_files_usage,
+        args.max_lines_per_file,
+        desc="instance_usage"
     )
 
-    instance_events = load_parallel(
-        events_dir,
+    events = load_sequential(
+        os.path.join(args.raw_dir, "instance_events"),
         parse_instance_events_file,
-        max_files=args.max_files_events,
-        max_lines=args.max_lines_per_file,
-        desc="instance_events",
+        args.max_files_events,
+        args.max_lines_per_file,
+        desc="instance_events"
     )
 
-    machine_events = load_parallel(
-        machines_dir,
+    machine_events = load_sequential(
+        os.path.join(args.raw_dir, "machine_events"),
         parse_machine_events_file,
-        max_files=args.max_files_machines,
-        max_lines=args.max_lines_per_file,
-        desc="machine_events",
+        args.max_files_machines,
+        args.max_lines_per_file,
+        desc="machine_events"
     )
 
-    if instance_usage is None or machine_events is None:
-        raise RuntimeError("Missing required data (usage or machine_events). Check raw_dir layout.")
+    # Capacity inference from usage
+    caps = infer_machine_capacity_from_usage(usage)
 
-    # Summaries
-    caps = summarize_machine_capacity(machine_events)
+    # Build datasets
+    machine_level = build_machine_level(usage, caps, events)
+    cluster_level = build_cluster_level(machine_level, events)
 
-    # Machine-level
-    machine_level = build_machine_level(instance_usage, caps, instance_events)
-    machine_out = os.path.join(args.out_dir, "machine_level.parquet")
-    print(f"💾 Saving machine-level → {machine_out}")
-    machine_level.write_parquet(machine_out)
+    # Save results
+    os.makedirs(args.out_dir, exist_ok=True)
+    machine_level.write_parquet(os.path.join(args.out_dir, "machine_level.parquet"))
+    cluster_level.write_parquet(os.path.join(args.out_dir, "cluster_level.parquet"))
 
-    # Cluster-level
-    cluster_level = build_cluster_level(machine_level, instance_events)
-    cluster_out = os.path.join(args.out_dir, "cluster_level.parquet")
-    print(f"💾 Saving cluster-level → {cluster_out}")
-    cluster_level.write_parquet(cluster_out)
-
-    print("\n🎉 DONE — Production-grade processing completed successfully")
+    print("\n🎉 DONE — Processing finished successfully.\n")
 
 
 if __name__ == "__main__":
