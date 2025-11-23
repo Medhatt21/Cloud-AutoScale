@@ -136,6 +136,9 @@ class CloudSimulator:
         self.total_scale_events = 0
         self.total_cost = 0.0
         
+        # Build history for proactive autoscalers
+        history_rows = []
+        
         # Run simulation step by step
         for idx, row in demand_df.iterrows():
             step = int(row['step'])
@@ -156,14 +159,36 @@ class CloudSimulator:
             violation = 1 if utilization > 1.0 else 0
             self.total_violations += violation
             
-            # Make scaling decision
-            scaling_action = autoscaler.decide(
-                current_capacity=self.current_capacity,
-                current_machines=self.current_machines,
-                demand=total_demand,
-                utilization=utilization,
-                time=time
-            )
+            # Build history row for proactive autoscalers
+            history_row = {
+                'step': step,
+                'time': time,
+                'cpu_demand': cpu_demand,
+                'mem_demand': mem_demand,
+                'new_instances_norm': np.log1p(row.get('new_instances', 0))
+            }
+            history_rows.append(history_row)
+            history_df = pd.DataFrame(history_rows)
+            
+            # Make scaling decision (try with history_df for proactive autoscalers)
+            try:
+                scaling_action = autoscaler.decide(
+                    current_capacity=self.current_capacity,
+                    current_machines=self.current_machines,
+                    demand=total_demand,
+                    utilization=utilization,
+                    time=time,
+                    history_df=history_df
+                )
+            except TypeError:
+                # Fallback for baseline autoscaler that doesn't accept history_df
+                scaling_action = autoscaler.decide(
+                    current_capacity=self.current_capacity,
+                    current_machines=self.current_machines,
+                    demand=total_demand,
+                    utilization=utilization,
+                    time=time
+                )
             
             # Apply scaling action
             if scaling_action != 0:

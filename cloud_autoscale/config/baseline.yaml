@@ -31,6 +31,9 @@ simulation:
 
 # Autoscaler configuration
 autoscaler:
+  # Autoscaler type: "baseline" (reactive) or "proactive" (ML-driven)
+  type: "baseline"
+  
   # Scale up when utilization exceeds this threshold
   upper_threshold: 0.7
   

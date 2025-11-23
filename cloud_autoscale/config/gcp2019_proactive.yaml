@@ -1,5 +1,5 @@
-# Cloud AutoScale - GCP 2019 Configuration
-# All fields are required - no defaults are provided in code
+# Cloud AutoScale - GCP 2019 Proactive Configuration
+# ML-driven proactive autoscaling using trained forecasting models
 
 # Mode: "synthetic" or "gcp_2019"
 mode: "gcp_2019"
@@ -36,7 +36,7 @@ simulation:
 # Autoscaler configuration
 autoscaler:
   # Autoscaler type: "baseline" (reactive) or "proactive" (ML-driven)
-  type: "baseline"
+  type: "proactive"
   
   # Scale up when utilization exceeds this threshold
   upper_threshold: 0.8
@@ -50,10 +50,10 @@ autoscaler:
   # Cooldown period in time steps (to prevent thrashing)
   cooldown_steps: 3
   
-  # Proactive autoscaler parameters (only used if type="proactive")
-  # safety_margin: 1.10          # Add 10% safety margin to forecasts
-  # history_window: 200          # Number of recent steps for forecasting
-  # model_run_dir: "results/run_20251123_175247"  # Path to trained model
+  # Proactive autoscaler parameters
+  safety_margin: 1.10          # Add 10% safety margin to forecasts
+  history_window: 200          # Number of recent steps for forecasting
+  model_run_dir: "latest"      # Use "latest" to auto-detect, or specify path like "results/run_20251123_175247"
 
 # Output configuration
 output:

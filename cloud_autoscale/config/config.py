@@ -134,6 +134,15 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     
     # Validate autoscaler config - ALL fields required
     auto_config = config['autoscaler']
+    
+    # Validate autoscaler type (optional, defaults to baseline)
+    autoscaler_type = auto_config.get('type', 'baseline')
+    valid_types = ['baseline', 'proactive']
+    if autoscaler_type not in valid_types:
+        raise ValueError(
+            f"Invalid autoscaler.type: '{autoscaler_type}'. Must be one of {valid_types}"
+        )
+    
     required_auto = [
         'upper_threshold',
         'lower_threshold',
@@ -155,6 +164,20 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("autoscaler.max_scale_per_step must be an integer >= 1")
     if not isinstance(auto_config['cooldown_steps'], int) or auto_config['cooldown_steps'] < 0:
         raise ValueError("autoscaler.cooldown_steps must be a non-negative integer")
+    
+    # Validate proactive-specific parameters (optional with defaults)
+    if autoscaler_type == 'proactive':
+        if 'safety_margin' in auto_config:
+            if not isinstance(auto_config['safety_margin'], (int, float)) or auto_config['safety_margin'] < 1.0:
+                raise ValueError("autoscaler.safety_margin must be a number >= 1.0")
+        
+        if 'history_window' in auto_config:
+            if not isinstance(auto_config['history_window'], int) or auto_config['history_window'] < 20:
+                raise ValueError("autoscaler.history_window must be an integer >= 20")
+        
+        if 'model_run_dir' in auto_config:
+            if not isinstance(auto_config['model_run_dir'], str):
+                raise ValueError("autoscaler.model_run_dir must be a string")
     
     # Validate output section
     if 'directory' not in config['output']:
