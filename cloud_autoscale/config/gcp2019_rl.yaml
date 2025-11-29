@@ -1,0 +1,36 @@
+mode: "gcp_2019"
+
+data:
+  processed_dir: "data/processed"
+  # duration_minutes: 10000  # Optional limit for training speed
+
+simulation:
+  step_minutes: 5
+  min_machines: 100
+  max_machines: 5000
+  machine_capacity: 1.0  # Normalized capacity units per machine
+  cost_per_machine_per_hour: 0.05
+
+autoscaler:
+  type: "rl"
+  model_rl_dir: "results/run_rl_20251129_194023"      # path to trained DQN model
+  action_mapping:
+    - -3
+    - -1
+    - 0
+    - 1
+    - 3
+
+training:
+  num_episodes: 30
+  max_steps: 5000
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 0.995
+  gamma: 0.99
+  lr: 1e-4
+  batch_size: 32
+  replay_size: 50000
+
+output:
+  directory: "results"
