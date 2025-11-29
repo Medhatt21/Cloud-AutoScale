@@ -7,7 +7,7 @@ for use inside the simulator by proactive autoscalers.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import json
 import numpy as np
@@ -29,36 +29,54 @@ class ForecastingModel:
         Args:
             run_dir: Path to a specific simulation run directory, e.g. results/run_20251123_175247
                      The modeling notebook should have saved:
-                       - run_dir / "modeling" / "model.pkl"
+                       - run_dir / "modeling" / "model_t1.pkl"
+                       - run_dir / "modeling" / "model_t3.pkl"
+                       - run_dir / "modeling" / "model_t6.pkl"
                        - run_dir / "modeling" / "scaler.pkl"
                        - run_dir / "modeling" / "feature_cols.json"
         
         Raises:
-            FileNotFoundError: If required model artifacts are missing
+            RuntimeError: If required model artifacts are missing
         """
         self.run_dir = Path(run_dir)
         model_dir = self.run_dir / "modeling"
         
         # Validate model directory exists
         if not model_dir.exists():
-            raise FileNotFoundError(
+            raise RuntimeError(
                 f"Modeling directory not found: {model_dir}\n"
                 f"Please run the modeling notebook first to train and save models."
             )
         
-        # Load model
-        model_path = model_dir / "model.pkl"
-        if not model_path.exists():
-            raise FileNotFoundError(
-                f"Model file not found: {model_path}\n"
-                f"Please run the modeling notebook to save the trained model."
+        # Load three separate direct multi-horizon models (mandatory)
+        model_t1_path = model_dir / "model_t1.pkl"
+        if not model_t1_path.exists():
+            raise RuntimeError(
+                f"Model file not found: {model_t1_path}\n"
+                f"Direct multi-horizon model for t+1 is required."
             )
-        self.model = joblib.load(model_path)
+        self.model_t1 = joblib.load(model_t1_path)
+        
+        model_t3_path = model_dir / "model_t3.pkl"
+        if not model_t3_path.exists():
+            raise RuntimeError(
+                f"Model file not found: {model_t3_path}\n"
+                f"Direct multi-horizon model for t+3 is required."
+            )
+        self.model_t3 = joblib.load(model_t3_path)
+        
+        model_t6_path = model_dir / "model_t6.pkl"
+        if not model_t6_path.exists():
+            raise RuntimeError(
+                f"Model file not found: {model_t6_path}\n"
+                f"Direct multi-horizon model for t+6 is required."
+            )
+        self.model_t6 = joblib.load(model_t6_path)
         
         # Load scaler
         scaler_path = model_dir / "scaler.pkl"
         if not scaler_path.exists():
-            raise FileNotFoundError(
+            raise RuntimeError(
                 f"Scaler file not found: {scaler_path}\n"
                 f"Please run the modeling notebook to save the scaler."
             )
@@ -67,7 +85,7 @@ class ForecastingModel:
         # Load feature columns
         feature_cols_path = model_dir / "feature_cols.json"
         if not feature_cols_path.exists():
-            raise FileNotFoundError(
+            raise RuntimeError(
                 f"Feature columns file not found: {feature_cols_path}\n"
                 f"Please run the modeling notebook to save feature metadata."
             )
@@ -148,7 +166,7 @@ class ForecastingModel:
     
     def predict_next(self, history: pd.DataFrame) -> float:
         """
-        One-step-ahead forecast of cpu_demand.
+        One-step-ahead forecast of cpu_demand using direct t+1 model.
         
         Args:
             history: DataFrame with recent time steps (columns: step, time, cpu_demand, 
@@ -158,68 +176,49 @@ class ForecastingModel:
             Predicted CPU demand for next time step
         """
         X = self._prepare_single_row(history)
-        y_hat = float(self.model.predict(X.reshape(1, -1))[0])
+        y_hat = float(self.model_t1.predict(X.reshape(1, -1))[0])
+        
+        # Fail-fast validation
+        if np.isnan(y_hat):
+            raise RuntimeError("Model t+1 prediction returned NaN")
+        
         return y_hat
     
-    def recursive_forecast(self, history: pd.DataFrame, steps: int = 6) -> List[float]:
-        """
-        Simplified recursive multi-step forecast (t+1 ... t+steps).
-        
-        For each step, we recompute features by appending the last prediction
-        to the history as a new cpu_demand row, keeping other columns constant.
-        This keeps implementation simple and avoids heavy changes to the simulator.
-        
-        Args:
-            history: DataFrame with recent time steps
-            steps: Number of steps to forecast ahead (default: 6)
-        
-        Returns:
-            List of predicted CPU demands
-        """
-        preds: List[float] = []
-        hist = history.copy()
-        
-        for _ in range(steps):
-            y_hat = self.predict_next(hist)
-            preds.append(y_hat)
-            
-            # Append a "fake" next row using predicted cpu_demand,
-            # and carrying forward other series (mem_demand, events) from last row
-            last = hist.iloc[-1].copy()
-            new_row = last.copy()
-            new_row["step"] = last["step"] + 1
-            
-            # Calculate time delta from last two rows
-            if len(hist) >= 2:
-                time_delta = hist["time"].iloc[-1] - hist["time"].iloc[-2]
-            else:
-                time_delta = 5.0  # Default to 5 minutes
-            
-            new_row["time"] = last["time"] + time_delta
-            new_row["cpu_demand"] = y_hat
-            # Leave mem_demand/new_instances_norm as last known values for simplicity
-            
-            hist = pd.concat([hist, new_row.to_frame().T], ignore_index=True)
-        
-        return preds
     
-    def multi_horizon(self, history: pd.DataFrame) -> Dict[str, float]:
+    def multi_horizon(self, history: pd.DataFrame) -> Dict[str, Any]:
         """
-        Convenience helper for autoscaler: returns t+1, t+3, t+6
-        plus the full sequence.
+        Direct multi-horizon forecast using separate models for t+1, t+3, t+6.
         
         Args:
             history: DataFrame with recent time steps
         
         Returns:
             Dictionary with keys: 't+1', 't+3', 't+6', 'full'
+            'full' contains [t+1, None, t+3, None, None, t+6] for compatibility
+        
+        Raises:
+            RuntimeError: If any model prediction fails or returns NaN
         """
-        seq = self.recursive_forecast(history, steps=6)
+        X = self._prepare_single_row(history)
+        
+        # Predict using three separate direct models
+        t1 = float(self.model_t1.predict(X.reshape(1, -1))[0])
+        t3 = float(self.model_t3.predict(X.reshape(1, -1))[0])
+        t6 = float(self.model_t6.predict(X.reshape(1, -1))[0])
+        
+        # Fail-fast validation
+        if np.isnan(t1):
+            raise RuntimeError("Model t+1 prediction returned NaN")
+        if np.isnan(t3):
+            raise RuntimeError("Model t+3 prediction returned NaN")
+        if np.isnan(t6):
+            raise RuntimeError("Model t+6 prediction returned NaN")
+        
         out = {
-            "t+1": seq[0],
-            "t+3": seq[2],
-            "t+6": seq[5],
-            "full": seq,
+            "t+1": t1,
+            "t+3": t3,
+            "t+6": t6,
+            "full": [t1, None, t3, None, None, t6],
         }
         return out
 

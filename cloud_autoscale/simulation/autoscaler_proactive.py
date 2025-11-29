@@ -17,6 +17,8 @@ class ProactiveAutoscalerConfig:
     cooldown_steps: int = 3
     max_scale_per_step: int = 3
     history_window: int = 30  # number of recent steps to use for forecasting
+    down_cooldown_multiplier: int = 3  # multiplier for downscale cooldown
+    downscale_confirmation: bool = True  # require double-confirmation for downscale
 
 
 class ProactiveAutoscaler:
@@ -62,12 +64,14 @@ class ProactiveAutoscaler:
             'upper_threshold',
             'lower_threshold',
             'max_scale_per_step',
-            'cooldown_steps'
+            'cooldown_steps',
+            'down_cooldown_multiplier',
+            'downscale_confirmation'
         ]
         
         missing_keys = [key for key in required_keys if key not in autoscaler_config]
         if missing_keys:
-            raise ValueError(
+            raise KeyError(
                 f"Missing required autoscaler config keys: {missing_keys}"
             )
         
@@ -96,6 +100,15 @@ class ProactiveAutoscaler:
         self.history_window = autoscaler_config.get('history_window', 30)
         if not isinstance(self.history_window, int) or self.history_window < 20:
             raise ValueError("history_window must be an integer >= 20")
+        
+        # New required parameters
+        self.down_cooldown_multiplier = autoscaler_config['down_cooldown_multiplier']
+        if not isinstance(self.down_cooldown_multiplier, int) or self.down_cooldown_multiplier < 1:
+            raise ValueError("down_cooldown_multiplier must be an integer >= 1")
+        
+        self.downscale_confirmation = autoscaler_config['downscale_confirmation']
+        if not isinstance(self.downscale_confirmation, bool):
+            raise ValueError("downscale_confirmation must be a boolean")
         
         # State (internal, not config)
         self.last_scale_up_step = -999999
@@ -138,7 +151,7 @@ class ProactiveAutoscaler:
             self._cooldown_remaining -= 1
             return 0
         
-        # If no history provided or not enough history, fall back to reactive behavior
+        # Reactive fallback only allowed when history is insufficient
         if history_df is None or len(history_df) < self.history_window:
             # Reactive fallback (same as baseline)
             if utilization > self.upper_threshold:
@@ -149,46 +162,41 @@ class ProactiveAutoscaler:
             elif utilization < self.lower_threshold:
                 if steps_since_scale_down >= self.cooldown_steps:
                     self.last_scale_down_step = current_step
-                    self._cooldown_remaining = self.cooldown_steps
-                    return -self.max_scale_per_step
+                    self._cooldown_remaining = self.cooldown_steps * self.down_cooldown_multiplier
+                    return -1  # Hard cap downscale at -1
             return 0
         
         # Clip history window
         history_window = history_df.tail(self.history_window)
         
-        # Forecast future CPU demand using forward horizon
-        try:
-            forecast = self.forecast_model.multi_horizon(history_window)
-            seq = forecast["full"]
-            
-            # Use horizon-max for better anticipation (first 3 steps only)
-            horizon_cpu = max(seq[0:3]) * self.safety_margin
-        except Exception as e:
-            # If forecasting fails, fall back to reactive behavior
-            print(f"Warning: Forecasting failed ({e}), using reactive policy")
-            if utilization > self.upper_threshold:
-                if steps_since_scale_up >= self.cooldown_steps:
-                    self.last_scale_up_step = current_step
-                    self._cooldown_remaining = self.cooldown_steps
-                    return self.max_scale_per_step
-            elif utilization < self.lower_threshold:
-                if steps_since_scale_down >= self.cooldown_steps:
-                    self.last_scale_down_step = current_step
-                    self._cooldown_remaining = self.cooldown_steps
-                    return -self.max_scale_per_step
-            return 0
+        # Forecast future CPU demand using direct multi-horizon models
+        # No try-except: fail-fast if forecasting fails
+        forecast = self.forecast_model.multi_horizon(history_window)
+        
+        # Asymmetric horizon logic
+        # Scale-up: use aggressive horizon (max of t+1 and 80% of t+3) with safety margin
+        horizon_cpu_up = max(
+            forecast["t+1"],
+            0.8 * forecast["t+3"]
+        ) * self.safety_margin
+        
+        # Scale-down: use conservative horizon (90% of t+1 only)
+        horizon_cpu_down = forecast["t+1"] * 0.9
         
         # Calculate machine capacity (demand is max of CPU and memory)
         machine_capacity = current_capacity / max(current_machines, 1)
         
-        # Calculate projected utilization using horizon forecast
-        projected_util = horizon_cpu / max(current_capacity, 1e-6)
+        # Calculate projected utilization for scale-up using aggressive horizon
+        projected_util_up = horizon_cpu_up / max(current_capacity, 1e-6)
+        
+        # Calculate projected utilization for scale-down using conservative horizon
+        projected_util_down = horizon_cpu_down / max(current_capacity, 1e-6)
         
         scale_delta = 0
         
-        if projected_util >= self.upper_threshold:
-            # Scale up proactively based on horizon forecast
-            desired_machines = int(np.ceil(horizon_cpu / machine_capacity))
+        if projected_util_up >= self.upper_threshold:
+            # Scale up proactively based on aggressive horizon forecast
+            desired_machines = int(np.ceil(horizon_cpu_up / machine_capacity))
             
             # Ensure at least +1 and obey max per step
             delta = desired_machines - current_machines
@@ -196,19 +204,38 @@ class ProactiveAutoscaler:
                 delta = min(delta, self.max_scale_per_step)
             scale_delta = delta
             
-        elif projected_util <= self.lower_threshold:
-            # Scale down less aggressively
-            desired_machines = max(
-                self.min_machines,
-                int(np.ceil(horizon_cpu / machine_capacity))
-            )
-            
-            delta = desired_machines - current_machines
-            
-            if delta < 0:
-                delta = max(delta, -self.max_scale_per_step)
-            
-            scale_delta = delta
+        elif projected_util_down <= self.lower_threshold:
+            # Scale down conservatively with double-confirmation rule
+            if self.downscale_confirmation:
+                # Both current and projected must be below threshold
+                if utilization <= self.lower_threshold and projected_util_down <= self.lower_threshold:
+                    desired_machines = max(
+                        self.min_machines,
+                        int(np.ceil(horizon_cpu_down / machine_capacity))
+                    )
+                    
+                    delta = desired_machines - current_machines
+                    
+                    if delta < 0:
+                        # Hard cap: max downscale per step = 1
+                        delta = -1
+                    
+                    scale_delta = delta
+                # else: skip downscale entirely
+            else:
+                # No double-confirmation required
+                desired_machines = max(
+                    self.min_machines,
+                    int(np.ceil(horizon_cpu_down / machine_capacity))
+                )
+                
+                delta = desired_machines - current_machines
+                
+                if delta < 0:
+                    # Hard cap: max downscale per step = 1
+                    delta = -1
+                
+                scale_delta = delta
         
         # Clamp to bounds
         new_machines = current_machines + scale_delta
@@ -217,13 +244,16 @@ class ProactiveAutoscaler:
         elif new_machines > self.max_machines:
             scale_delta = self.max_machines - current_machines
         
-        # Apply cooldown if we actually scaled
+        # Apply asymmetric cooldown if we actually scaled
         if scale_delta != 0:
             if scale_delta > 0:
                 self.last_scale_up_step = current_step
+                # Upscale: normal cooldown
+                self._cooldown_remaining = self.cooldown_steps
             else:
                 self.last_scale_down_step = current_step
-            self._cooldown_remaining = self.cooldown_steps
+                # Downscale: extended cooldown
+                self._cooldown_remaining = self.cooldown_steps * self.down_cooldown_multiplier
         
         return scale_delta
 

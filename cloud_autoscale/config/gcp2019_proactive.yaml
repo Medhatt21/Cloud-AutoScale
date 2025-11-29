@@ -51,9 +51,14 @@ autoscaler:
   cooldown_steps: 1
   
   # Proactive autoscaler parameters
-  safety_margin: 1.25          # Add 25% safety margin to forecasts
+  # Must be tuned based on model residuals
+  safety_margin: 1.18          # Add 18% safety margin to forecasts
   history_window: 30           # Number of recent steps for forecasting
   model_run_dir: "latest"      # Use "latest" to auto-detect, or specify path like "results/run_20251123_175247"
+  
+  # Asymmetric scaling parameters
+  down_cooldown_multiplier: 3  # Downscale cooldown is 3x longer than upscale
+  downscale_confirmation: true # Require double-confirmation for downscale
 
 # Output configuration
 output:
