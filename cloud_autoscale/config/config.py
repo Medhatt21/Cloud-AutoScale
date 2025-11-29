@@ -137,33 +137,42 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     
     # Validate autoscaler type (optional, defaults to baseline)
     autoscaler_type = auto_config.get('type', 'baseline')
-    valid_types = ['baseline', 'proactive']
+    valid_types = ['baseline', 'proactive', 'rl']
     if autoscaler_type not in valid_types:
         raise ValueError(
             f"Invalid autoscaler.type: '{autoscaler_type}'. Must be one of {valid_types}"
         )
     
-    required_auto = [
-        'upper_threshold',
-        'lower_threshold',
-        'max_scale_per_step',
-        'cooldown_steps'
-    ]
-    for key in required_auto:
-        if key not in auto_config:
-            raise ValueError(f"Missing required key 'autoscaler.{key}' in config")
-    
-    # Validate threshold values and types
-    if not isinstance(auto_config['upper_threshold'], (int, float)) or not (0 < auto_config['upper_threshold'] <= 1):
-        raise ValueError("autoscaler.upper_threshold must be a number between 0 and 1")
-    if not isinstance(auto_config['lower_threshold'], (int, float)) or not (0 < auto_config['lower_threshold'] < auto_config['upper_threshold']):
-        raise ValueError(
-            "autoscaler.lower_threshold must be a number between 0 and upper_threshold"
-        )
-    if not isinstance(auto_config['max_scale_per_step'], int) or auto_config['max_scale_per_step'] < 1:
-        raise ValueError("autoscaler.max_scale_per_step must be an integer >= 1")
-    if not isinstance(auto_config['cooldown_steps'], int) or auto_config['cooldown_steps'] < 0:
-        raise ValueError("autoscaler.cooldown_steps must be a non-negative integer")
+    # RL autoscaler has different required fields
+    if autoscaler_type == 'rl':
+        # RL only requires action_mapping
+        if 'action_mapping' not in auto_config:
+            raise ValueError("Missing required key 'autoscaler.action_mapping' for RL autoscaler")
+        if not isinstance(auto_config['action_mapping'], list):
+            raise ValueError("autoscaler.action_mapping must be a list")
+    else:
+        # Baseline and proactive require threshold-based parameters
+        required_auto = [
+            'upper_threshold',
+            'lower_threshold',
+            'max_scale_per_step',
+            'cooldown_steps'
+        ]
+        for key in required_auto:
+            if key not in auto_config:
+                raise ValueError(f"Missing required key 'autoscaler.{key}' in config")
+        
+        # Validate threshold values and types
+        if not isinstance(auto_config['upper_threshold'], (int, float)) or not (0 < auto_config['upper_threshold'] <= 1):
+            raise ValueError("autoscaler.upper_threshold must be a number between 0 and 1")
+        if not isinstance(auto_config['lower_threshold'], (int, float)) or not (0 < auto_config['lower_threshold'] < auto_config['upper_threshold']):
+            raise ValueError(
+                "autoscaler.lower_threshold must be a number between 0 and upper_threshold"
+            )
+        if not isinstance(auto_config['max_scale_per_step'], int) or auto_config['max_scale_per_step'] < 1:
+            raise ValueError("autoscaler.max_scale_per_step must be an integer >= 1")
+        if not isinstance(auto_config['cooldown_steps'], int) or auto_config['cooldown_steps'] < 0:
+            raise ValueError("autoscaler.cooldown_steps must be a non-negative integer")
     
     # Validate proactive-specific parameters (optional with defaults)
     if autoscaler_type == 'proactive':

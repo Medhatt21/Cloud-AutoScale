@@ -53,7 +53,7 @@ autoscaler:
   # Proactive autoscaler parameters
   safety_margin: 1.25          # Add 25% safety margin to forecasts
   history_window: 30           # Number of recent steps for forecasting
-  model_run_dir: "latest"      # Use "latest" to auto-detect, or specify path like "results/run_20251123_175247"
+  model_run_dir: "results/run_rl_20251129_194023"      # Path to trained forecasting model (LightGBM)
 
 # Output configuration
 output:

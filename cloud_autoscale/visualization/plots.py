@@ -972,3 +972,289 @@ def plot_comparison_summary(
     
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+
+def plot_baseline_vs_rl(
+    baseline_results: Dict[str, Any],
+    rl_results: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """Compare baseline (reactive) vs RL autoscaling performance."""
+    baseline_timeline = baseline_results['timeline']
+    rl_timeline = rl_results['timeline']
+    baseline_metrics = baseline_results['metrics']
+    rl_metrics = rl_results['metrics']
+    
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+    
+    # 1. Machines
+    axes[0, 0].plot(baseline_timeline['time'], baseline_timeline['machines'], 
+                   label='Baseline', linewidth=2, color='#3498DB', alpha=0.8)
+    axes[0, 0].plot(rl_timeline['time'], rl_timeline['machines'], 
+                   label='RL Agent', linewidth=2, color='#2ECC71', alpha=0.8)
+    axes[0, 0].set_xlabel('Time (minutes)', fontweight='bold')
+    axes[0, 0].set_ylabel('Machines', fontweight='bold')
+    axes[0, 0].set_title('Machine Count Comparison', fontsize=13, fontweight='bold')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Utilization
+    axes[0, 1].plot(baseline_timeline['time'], baseline_timeline['utilization'], 
+                   label='Baseline', linewidth=1.5, color='#3498DB', alpha=0.7)
+    axes[0, 1].plot(rl_timeline['time'], rl_timeline['utilization'], 
+                   label='RL Agent', linewidth=1.5, color='#2ECC71', alpha=0.7)
+    axes[0, 1].axhline(y=1.0, color='red', linestyle='--', label='SLA Limit')
+    axes[0, 1].set_xlabel('Time (minutes)', fontweight='bold')
+    axes[0, 1].set_ylabel('Utilization', fontweight='bold')
+    axes[0, 1].set_title('Utilization Comparison', fontsize=13, fontweight='bold')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # 3. Violations
+    labels = ['Baseline', 'RL']
+    vals = [baseline_metrics['total_violations'], rl_metrics['total_violations']]
+    axes[1, 0].bar(labels, vals, color=['#3498DB', '#2ECC71'], alpha=0.8, edgecolor='black')
+    axes[1, 0].set_ylabel('Total Violations', fontweight='bold')
+    axes[1, 0].set_title('SLA Violations', fontsize=13, fontweight='bold')
+    axes[1, 0].grid(True, axis='y', alpha=0.3)
+    for i, v in enumerate(vals):
+        axes[1, 0].text(i, v, str(v), ha='center', va='bottom', fontweight='bold')
+        
+    # 4. Cost
+    vals_cost = [baseline_metrics['total_cost'], rl_metrics['total_cost']]
+    axes[1, 1].bar(labels, vals_cost, color=['#3498DB', '#2ECC71'], alpha=0.8, edgecolor='black')
+    axes[1, 1].set_ylabel('Total Cost ($)', fontweight='bold')
+    axes[1, 1].set_title('Total Cost', fontsize=13, fontweight='bold')
+    axes[1, 1].grid(True, axis='y', alpha=0.3)
+    for i, v in enumerate(vals_cost):
+        axes[1, 1].text(i, v, f"${v:.2f}", ha='center', va='bottom', fontweight='bold')
+        
+    plt.suptitle('Baseline vs RL Autoscaling Comparison', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ Saved {output_path}")
+
+
+def plot_rl_vs_proactive(
+    rl_results: Dict[str, Any],
+    proactive_results: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """Compare RL vs Proactive."""
+    rl_timeline = rl_results['timeline']
+    pro_timeline = proactive_results['timeline']
+    rl_metrics = rl_results['metrics']
+    pro_metrics = proactive_results['metrics']
+    
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+    
+    # 1. Machines
+    axes[0, 0].plot(rl_timeline['time'], rl_timeline['machines'], 
+                   label='RL Agent', linewidth=2, color='#2ECC71', alpha=0.8)
+    axes[0, 0].plot(pro_timeline['time'], pro_timeline['machines'], 
+                   label='Proactive', linewidth=2, color='#9B59B6', alpha=0.8)
+    axes[0, 0].set_ylabel('Machines', fontweight='bold')
+    axes[0, 0].set_title('Machine Count', fontsize=13, fontweight='bold')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Utilization
+    axes[0, 1].plot(rl_timeline['time'], rl_timeline['utilization'], 
+                   label='RL Agent', linewidth=1.5, color='#2ECC71', alpha=0.7)
+    axes[0, 1].plot(pro_timeline['time'], pro_timeline['utilization'], 
+                   label='Proactive', linewidth=1.5, color='#9B59B6', alpha=0.7)
+    axes[0, 1].axhline(y=1.0, color='red', linestyle='--', label='SLA Limit')
+    axes[0, 1].set_ylabel('Utilization', fontweight='bold')
+    axes[0, 1].set_title('Utilization', fontsize=13, fontweight='bold')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # 3. Violations
+    labels = ['RL', 'Proactive']
+    vals = [rl_metrics['total_violations'], pro_metrics['total_violations']]
+    axes[1, 0].bar(labels, vals, color=['#2ECC71', '#9B59B6'], alpha=0.8, edgecolor='black')
+    axes[1, 0].set_ylabel('Violations', fontweight='bold')
+    axes[1, 0].set_title('SLA Violations', fontsize=13, fontweight='bold')
+    for i, v in enumerate(vals):
+        axes[1, 0].text(i, v, str(v), ha='center', va='bottom', fontweight='bold')
+        
+    # 4. Cost
+    vals_cost = [rl_metrics['total_cost'], pro_metrics['total_cost']]
+    axes[1, 1].bar(labels, vals_cost, color=['#2ECC71', '#9B59B6'], alpha=0.8, edgecolor='black')
+    axes[1, 1].set_ylabel('Cost ($)', fontweight='bold')
+    axes[1, 1].set_title('Total Cost', fontsize=13, fontweight='bold')
+    for i, v in enumerate(vals_cost):
+        axes[1, 1].text(i, v, f"${v:.2f}", ha='center', va='bottom', fontweight='bold')
+        
+    plt.suptitle('RL vs Proactive Comparison', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ Saved {output_path}")
+
+
+def plot_rl_summary(
+    rl_results: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """Summary plot for RL run."""
+    plot_metrics_summary(rl_results['metrics'], output_path)
+    print(f"✓ Saved {output_path}")
+
+
+def plot_three_way_comparison(
+    baseline_results: Dict[str, Any],
+    proactive_results: Dict[str, Any],
+    rl_results: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """Create comprehensive 3-way comparison plot for all strategies."""
+    baseline_timeline = baseline_results['timeline']
+    proactive_timeline = proactive_results['timeline']
+    rl_timeline = rl_results['timeline']
+    
+    baseline_metrics = baseline_results['metrics']
+    proactive_metrics = proactive_results['metrics']
+    rl_metrics = rl_results['metrics']
+    
+    fig = plt.figure(figsize=(20, 12))
+    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+    
+    colors = {'baseline': '#3498DB', 'proactive': '#9B59B6', 'rl': '#2ECC71'}
+    
+    # 1. Machine Count Over Time
+    ax1 = fig.add_subplot(gs[0, :])
+    ax1.plot(baseline_timeline['time'], baseline_timeline['machines'], 
+             label='Baseline', linewidth=2, color=colors['baseline'], alpha=0.8)
+    ax1.plot(proactive_timeline['time'], proactive_timeline['machines'], 
+             label='Proactive (ML)', linewidth=2, color=colors['proactive'], alpha=0.8)
+    ax1.plot(rl_timeline['time'], rl_timeline['machines'], 
+             label='RL (DQN)', linewidth=2, color=colors['rl'], alpha=0.8)
+    ax1.set_xlabel('Time (minutes)', fontweight='bold', fontsize=12)
+    ax1.set_ylabel('Number of Machines', fontweight='bold', fontsize=12)
+    ax1.set_title('Machine Count Comparison - All Strategies', fontsize=14, fontweight='bold')
+    ax1.legend(loc='upper right', fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Utilization Over Time
+    ax2 = fig.add_subplot(gs[1, :])
+    ax2.plot(baseline_timeline['time'], baseline_timeline['utilization'], 
+             label='Baseline', linewidth=1.5, color=colors['baseline'], alpha=0.7)
+    ax2.plot(proactive_timeline['time'], proactive_timeline['utilization'], 
+             label='Proactive (ML)', linewidth=1.5, color=colors['proactive'], alpha=0.7)
+    ax2.plot(rl_timeline['time'], rl_timeline['utilization'], 
+             label='RL (DQN)', linewidth=1.5, color=colors['rl'], alpha=0.7)
+    ax2.axhline(y=1.0, color='red', linestyle='--', linewidth=2, label='SLA Threshold', alpha=0.6)
+    ax2.set_xlabel('Time (minutes)', fontweight='bold', fontsize=12)
+    ax2.set_ylabel('Utilization', fontweight='bold', fontsize=12)
+    ax2.set_title('Utilization Comparison - All Strategies', fontsize=14, fontweight='bold')
+    ax2.legend(loc='upper right', fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Total Violations
+    ax3 = fig.add_subplot(gs[2, 0])
+    strategies = ['Baseline', 'Proactive', 'RL']
+    violations = [baseline_metrics['total_violations'], proactive_metrics['total_violations'], rl_metrics['total_violations']]
+    bars = ax3.bar(strategies, violations, color=[colors['baseline'], colors['proactive'], colors['rl']], alpha=0.8, edgecolor='black', linewidth=2)
+    ax3.set_ylabel('Total Violations', fontweight='bold', fontsize=11)
+    ax3.set_title('SLA Violations', fontsize=13, fontweight='bold')
+    ax3.grid(True, axis='y', alpha=0.3)
+    for bar in bars:
+        height = bar.get_height()
+        ax3.text(bar.get_x() + bar.get_width()/2., height, f'{int(height)}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # 4. Total Cost
+    ax4 = fig.add_subplot(gs[2, 1])
+    costs = [baseline_metrics['total_cost'], proactive_metrics['total_cost'], rl_metrics['total_cost']]
+    bars = ax4.bar(strategies, costs, color=[colors['baseline'], colors['proactive'], colors['rl']], alpha=0.8, edgecolor='black', linewidth=2)
+    ax4.set_ylabel('Total Cost ($)', fontweight='bold', fontsize=11)
+    ax4.set_title('Total Cost', fontsize=13, fontweight='bold')
+    ax4.grid(True, axis='y', alpha=0.3)
+    for bar in bars:
+        height = bar.get_height()
+        ax4.text(bar.get_x() + bar.get_width()/2., height, f'${height:.2f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # 5. Scaling Events
+    ax5 = fig.add_subplot(gs[2, 2])
+    events = [baseline_metrics['total_scale_events'], proactive_metrics['total_scale_events'], rl_metrics['total_scale_events']]
+    bars = ax5.bar(strategies, events, color=[colors['baseline'], colors['proactive'], colors['rl']], alpha=0.8, edgecolor='black', linewidth=2)
+    ax5.set_ylabel('Total Events', fontweight='bold', fontsize=11)
+    ax5.set_title('Scaling Events', fontsize=13, fontweight='bold')
+    ax5.grid(True, axis='y', alpha=0.3)
+    for bar in bars:
+        height = bar.get_height()
+        ax5.text(bar.get_x() + bar.get_width()/2., height, f'{int(height)}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    plt.suptitle('Three-Way Strategy Comparison: Baseline vs Proactive vs RL', fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ Saved {output_path}")
+
+
+def plot_three_way_metrics_table(
+    baseline_results: Dict[str, Any],
+    proactive_results: Dict[str, Any],
+    rl_results: Dict[str, Any],
+    output_path: Path
+) -> None:
+    """Create a comprehensive metrics comparison table for all three strategies."""
+    bm = baseline_results['metrics']
+    pm = proactive_results['metrics']
+    rm = rl_results['metrics']
+    
+    fig, ax = plt.subplots(figsize=(14, 10))
+    ax.axis('off')
+    
+    bv, pv, rv = bm['total_violations'], pm['total_violations'], rm['total_violations']
+    bc, pc, rc = bm['total_cost'], pm['total_cost'], rm['total_cost']
+    
+    pvr = ((bv - pv) / bv * 100) if bv > 0 else 0
+    rvr = ((bv - rv) / bv * 100) if bv > 0 else 0
+    pcs = ((bc - pc) / bc * 100) if bc > 0 else 0
+    rcs = ((bc - rc) / bc * 100) if bc > 0 else 0
+    
+    winner_viol = 'Baseline' if bv <= min(pv, rv) else 'Proactive' if pv <= rv else 'RL'
+    winner_cost = 'Baseline' if bc <= min(pc, rc) else 'Proactive' if pc <= rc else 'RL'
+    winner_events = 'Baseline' if bm['total_scale_events'] <= min(pm['total_scale_events'], rm['total_scale_events']) else 'Proactive' if pm['total_scale_events'] <= rm['total_scale_events'] else 'RL'
+    
+    summary_text = f"""
+╔════════════════════════════════════════════════════════════════════════════════════╗
+║                    THREE-WAY STRATEGY COMPARISON                                   ║
+╠════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                    ║
+║  METRIC                    BASELINE        PROACTIVE (ML)      RL (DQN)           ║
+║  ──────────────────────────────────────────────────────────────────────────────   ║
+║                                                                                    ║
+║  SLA VIOLATIONS                                                                    ║
+║    Total Violations        {bv:>6d}          {pv:>6d}            {rv:>6d}              ║
+║    Violation Rate          {bm['violation_rate']*100:>6.2f}%         {pm['violation_rate']*100:>6.2f}%           {rm['violation_rate']*100:>6.2f}%             ║
+║    vs Baseline                  —            {pvr:>6.1f}%           {rvr:>6.1f}%            ║
+║                                                                                    ║
+║  COST EFFICIENCY                                                                   ║
+║    Total Cost ($)         ${bc:>7.2f}        ${pc:>7.2f}         ${rc:>7.2f}           ║
+║    Cost/Hour ($)          ${bm['cost_per_hour']:>7.2f}        ${pm['cost_per_hour']:>7.2f}         ${rm['cost_per_hour']:>7.2f}           ║
+║    Savings vs Baseline          —            {pcs:>6.1f}%           {rcs:>6.1f}%            ║
+║                                                                                    ║
+║  RESOURCE UTILIZATION                                                              ║
+║    Avg Utilization         {bm['avg_utilization']*100:>6.2f}%         {pm['avg_utilization']*100:>6.2f}%           {rm['avg_utilization']*100:>6.2f}%             ║
+║    Avg Machines            {bm['avg_machines']:>7.1f}         {pm['avg_machines']:>7.1f}          {rm['avg_machines']:>7.1f}            ║
+║                                                                                    ║
+║  SYSTEM STABILITY                                                                  ║
+║    Total Scale Events      {bm['total_scale_events']:>7d}         {pm['total_scale_events']:>7d}          {rm['total_scale_events']:>7d}            ║
+║                                                                                    ║
+╠════════════════════════════════════════════════════════════════════════════════════╣
+║  WINNER BY METRIC                                                                  ║
+║    🏆 Lowest Violations:   {winner_viol:^20}                                        ║
+║    🏆 Lowest Cost:         {winner_cost:^20}                                        ║
+║    🏆 Fewest Events:       {winner_events:^20}                                        ║
+╚════════════════════════════════════════════════════════════════════════════════════╝
+    """
+    
+    ax.text(0.5, 0.5, summary_text, ha='center', va='center', fontsize=9, family='monospace',
+            bbox=dict(boxstyle='round,pad=1.5', facecolor='lightblue', alpha=0.2))
+    
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ Saved {output_path}")

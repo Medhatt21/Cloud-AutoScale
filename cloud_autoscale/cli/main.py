@@ -15,6 +15,7 @@ from cloud_autoscale.visualization import create_all_plots, create_comparison_pl
 from cloud_autoscale.forecasting import ForecastingModel
 from cloud_autoscale.simulation.autoscaler_proactive import ProactiveAutoscaler
 from cloud_autoscale.simulation.metrics import compare_metrics
+from cloud_autoscale.rl.train import train_rl
 import json
 import pandas as pd
 
@@ -47,13 +48,22 @@ Examples:
                            help='Override synthetic pattern (for synthetic mode)')
     run_parser.add_argument('--output', '-o', type=str,
                            help='Override output directory')
+
+    # Run RL Training command
+    run_rl_parser = subparsers.add_parser('run-rl', help='Run RL training')
+    run_rl_parser.add_argument('--config', '-c', type=str, required=True,
+                           help='Path to RL configuration file')
+    run_rl_parser.add_argument('--output', '-o', type=str,
+                           help='Output directory for model and logs')
     
     # Compare command
-    compare_parser = subparsers.add_parser('compare', help='Compare baseline vs proactive autoscaling')
+    compare_parser = subparsers.add_parser('compare', help='Compare baseline vs proactive vs RL autoscaling')
     compare_parser.add_argument('--baseline', type=str, required=True,
                                help='Path to baseline configuration file')
-    compare_parser.add_argument('--proactive', type=str, required=True,
+    compare_parser.add_argument('--proactive', type=str, required=False,
                                help='Path to proactive configuration file')
+    compare_parser.add_argument('--rl', type=str, required=False,
+                               help='Path to RL configuration file')
     compare_parser.add_argument('--model', type=str, required=False,
                                help='Override model path for proactive autoscaler')
     compare_parser.add_argument('--output', '-o', type=str, required=False,
@@ -63,10 +73,56 @@ Examples:
     
     if args.command == 'run':
         run_simulation(args)
+    elif args.command == 'run-rl':
+        run_rl_training(args)
     elif args.command == 'compare':
         run_comparison(args)
     else:
         parser.print_help()
+
+
+def run_rl_training(args):
+    """Run RL training."""
+    print("=" * 70)
+    print("CLOUD AUTOSCALE - RL Training")
+    print("=" * 70)
+    print()
+    
+    # Load configuration
+    print(f"📋 Loading configuration from: {args.config}")
+    try:
+        config = load_config(args.config)
+    except Exception as e:
+        print(f"❌ Error loading config: {e}")
+        sys.exit(1)
+        
+    # Set output directory
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        # Default to results/run_rl_YYYYMMDD_HHMMSS
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path("results") / f"run_rl_{timestamp}"
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Output directory: {output_dir}")
+    print()
+    
+    try:
+        train_rl(config, output_dir)
+        
+        # Save config
+        import yaml
+        config_path = output_dir / "config.yaml"
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        print(f"💾 Configuration saved: {config_path}")
+        
+    except Exception as e:
+        print(f"❌ Error during training: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def run_simulation(args):
@@ -221,7 +277,17 @@ def run_simulation(args):
             print(f"   Cooldown steps: {config['autoscaler']['cooldown_steps']}")
             print(f"   Safety margin: {config['autoscaler'].get('safety_margin', 1.10)}")
             print(f"   History window: {config['autoscaler'].get('history_window', 200)}")
-        
+
+        elif autoscaler_type == "rl":
+            from cloud_autoscale.rl.autoscaler_rl import RLAutoscaler
+            autoscaler = RLAutoscaler(
+                autoscaler_config=config['autoscaler'],
+                step_minutes=config['simulation']['step_minutes'],
+                min_machines=config['simulation']['min_machines'],
+                max_machines=config['simulation']['max_machines']
+            )
+            print(f"   RL Model: {config['autoscaler'].get('model_rl_dir', 'latest')}")
+
         else:
             raise ValueError(f"Invalid autoscaler type: {autoscaler_type}")
         
@@ -298,9 +364,9 @@ def run_simulation(args):
 
 
 def run_comparison(args):
-    """Run comparison between baseline and proactive autoscalers."""
+    """Run comparison between baseline, proactive, and RL autoscalers."""
     print("=" * 70)
-    print("CLOUD AUTOSCALE - Baseline vs Proactive Comparison")
+    print("CLOUD AUTOSCALE - Multi-Strategy Comparison")
     print("=" * 70)
     print()
     
@@ -312,175 +378,148 @@ def run_comparison(args):
         comparison_dir = Path("results") / f"comparison_{timestamp}"
     
     comparison_dir.mkdir(parents=True, exist_ok=True)
-    baseline_dir = comparison_dir / "baseline"
-    proactive_dir = comparison_dir / "proactive"
     
     print(f"📁 Comparison directory: {comparison_dir}")
     print()
     
-    # ========== Run Baseline Simulation ==========
-    print("🔵 Running BASELINE simulation...")
-    print("-" * 70)
+    results_map = {}
     
-    try:
-        baseline_config = load_config(args.baseline)
-        # Override output directory
-        baseline_config['output']['directory'] = str(baseline_dir)
+    # Function to run a single simulation
+    def run_single_sim(name, config_path, subdir):
+        print(f"🔵 Running {name.upper()} simulation...")
+        print("-" * 70)
         
-        # Load data
-        demand_df_baseline = load_demand_data(baseline_config)
-        print(f"   ✓ Loaded {len(demand_df_baseline)} time steps")
-        
-        # Initialize simulator and autoscaler
-        simulator_baseline = CloudSimulator(baseline_config['simulation'])
-        autoscaler_baseline = BaselineAutoscaler(
-            autoscaler_config=baseline_config['autoscaler'],
-            step_minutes=baseline_config['simulation']['step_minutes']
-        )
-        
-        # Run simulation
-        print("   Running baseline simulation...")
-        baseline_results = simulator_baseline.run(
-            demand_df_baseline,
-            autoscaler_baseline,
-            output_dir=str(baseline_dir),
-            save_results=True
-        )
-        
-        baseline_run_dir = Path(baseline_results['run_dir'])
-        baseline_metrics = baseline_results['metrics']
-        
-        print(f"   ✓ Baseline completed")
-        print(f"      Violations: {baseline_metrics['total_violations']}")
-        print(f"      Cost: ${baseline_metrics['total_cost']:.2f}")
-        print(f"      Avg Utilization: {baseline_metrics['avg_utilization']:.2%}")
-        print()
-        
-    except Exception as e:
-        print(f"❌ Error running baseline simulation: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # ========== Run Proactive Simulation ==========
-    print("🟣 Running PROACTIVE simulation...")
-    print("-" * 70)
-    
-    try:
-        proactive_config = load_config(args.proactive)
-        # Override output directory
-        proactive_config['output']['directory'] = str(proactive_dir)
-        
-        # Override model path if provided
-        if args.model:
-            proactive_config['autoscaler']['model_run_dir'] = args.model
-            print(f"   Using model: {args.model}")
-        
-        # Load data (should be same as baseline)
-        demand_df_proactive = load_demand_data(proactive_config)
-        print(f"   ✓ Loaded {len(demand_df_proactive)} time steps")
-        
-        # Initialize simulator
-        simulator_proactive = CloudSimulator(proactive_config['simulation'])
-        
-        # Initialize proactive autoscaler
-        model_run_dir = proactive_config['autoscaler'].get('model_run_dir', 'latest')
-        
-        if model_run_dir == 'latest':
-            # Auto-detect latest run with modeling artifacts
-            results_base = Path("results")
-            run_dirs = sorted(results_base.glob('run_*'))
+        try:
+            cfg = load_config(config_path)
+            cfg['output']['directory'] = str(subdir)
             
-            model_run_dir = None
-            for run_dir in reversed(run_dirs):
-                if (run_dir / 'modeling').exists():
-                    model_run_dir = run_dir
-                    break
+            # Special handling for proactive model override
+            if name == 'proactive' and args.model:
+                 cfg['autoscaler']['model_run_dir'] = args.model
+                 print(f"   Using model: {args.model}")
+
+            # Load data
+            demand_df = load_demand_data(cfg)
+            print(f"   ✓ Loaded {len(demand_df)} time steps")
             
-            if model_run_dir is None:
-                raise FileNotFoundError(
-                    f"No trained model found in {results_base}\n"
-                    f"Please run the modeling notebook first."
+            # Init simulator
+            sim = CloudSimulator(cfg['simulation'])
+            
+            # Init autoscaler
+            atype = cfg['autoscaler'].get('type', 'baseline')
+            if atype == 'baseline':
+                autoscaler = BaselineAutoscaler(
+                    autoscaler_config=cfg['autoscaler'],
+                    step_minutes=cfg['simulation']['step_minutes']
                 )
-            print(f"   Auto-detected model: {model_run_dir.name}")
-        else:
-            model_run_dir = Path(model_run_dir)
-            if not model_run_dir.exists():
-                raise FileNotFoundError(f"Model run directory not found: {model_run_dir}")
-        
-        forecast_model = ForecastingModel(model_run_dir)
-        autoscaler_proactive = ProactiveAutoscaler(
-            forecast_model=forecast_model,
-            autoscaler_config=proactive_config['autoscaler'],
-            step_minutes=proactive_config['simulation']['step_minutes'],
-            min_machines=proactive_config['simulation']['min_machines'],
-            max_machines=proactive_config['simulation']['max_machines']
-        )
-        
-        # Run simulation
-        print("   Running proactive simulation...")
-        proactive_results = simulator_proactive.run(
-            demand_df_proactive,
-            autoscaler_proactive,
-            output_dir=str(proactive_dir),
-            save_results=True
-        )
-        
-        proactive_run_dir = Path(proactive_results['run_dir'])
-        proactive_metrics = proactive_results['metrics']
-        
-        print(f"   ✓ Proactive completed")
-        print(f"      Violations: {proactive_metrics['total_violations']}")
-        print(f"      Cost: ${proactive_metrics['total_cost']:.2f}")
-        print(f"      Avg Utilization: {proactive_metrics['avg_utilization']:.2%}")
-        print()
-        
-    except Exception as e:
-        print(f"❌ Error running proactive simulation: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
+            elif atype == 'proactive':
+                 # Replicate proactive init logic roughly or assume config is correct
+                 # We need forecasting model
+                 model_run_dir = cfg['autoscaler'].get('model_run_dir', 'latest')
+                 # ... logic to find model ...
+                 if model_run_dir == 'latest':
+                    # Find latest run
+                    results_base = Path("results") # Should look in results/
+                    run_dirs = sorted(results_base.glob('run_*'))
+                    model_run_dir = None
+                    for rd in reversed(run_dirs):
+                        if (rd / 'modeling').exists():
+                            model_run_dir = rd
+                            break
+                    if not model_run_dir:
+                        raise FileNotFoundError("No trained model found.")
+                 else:
+                    model_run_dir = Path(model_run_dir)
+                    
+                 forecast_model = ForecastingModel(model_run_dir)
+                 autoscaler = ProactiveAutoscaler(
+                    forecast_model=forecast_model,
+                    autoscaler_config=cfg['autoscaler'],
+                    step_minutes=cfg['simulation']['step_minutes'],
+                    min_machines=cfg['simulation']['min_machines'],
+                    max_machines=cfg['simulation']['max_machines']
+                 )
+            elif atype == 'rl':
+                from cloud_autoscale.rl.autoscaler_rl import RLAutoscaler
+                autoscaler = RLAutoscaler(
+                    autoscaler_config=cfg['autoscaler'],
+                    step_minutes=cfg['simulation']['step_minutes'],
+                    min_machines=cfg['simulation']['min_machines'],
+                    max_machines=cfg['simulation']['max_machines']
+                )
+            else:
+                 raise ValueError(f"Unknown type {atype}")
+
+            # Run
+            res = sim.run(demand_df, autoscaler, output_dir=str(subdir), save_results=True)
+            print(f"   ✓ {name} completed")
+            return res
+
+        except Exception as e:
+            print(f"❌ Error running {name} simulation: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    # 1. Run Baseline
+    baseline_dir = comparison_dir / "baseline"
+    baseline_res = run_single_sim("baseline", args.baseline, baseline_dir)
+    if baseline_res:
+        results_map['baseline'] = baseline_res
+
+    # 2. Run Proactive (if provided)
+    if args.proactive:
+        proactive_dir = comparison_dir / "proactive"
+        proactive_res = run_single_sim("proactive", args.proactive, proactive_dir)
+        if proactive_res:
+             results_map['proactive'] = proactive_res
+
+    # 3. Run RL (if provided)
+    if args.rl:
+        rl_dir = comparison_dir / "rl"
+        rl_res = run_single_sim("rl", args.rl, rl_dir)
+        if rl_res:
+             results_map['rl'] = rl_res
+
+    # Only proceed if we have results
+    if not results_map:
+        print("No simulations completed successfully.")
+        return
+
     # ========== Merge Timelines ==========
     print("📊 Merging timelines and computing comparison metrics...")
     
     try:
-        baseline_timeline = baseline_results['timeline']
-        proactive_timeline = proactive_results['timeline']
+        # Start with baseline timeline
+        if 'baseline' not in results_map:
+             print("Error: Baseline required for comparison.")
+             return
+             
+        merged_df = results_map['baseline']['timeline'].copy()
+        suffix_map = {'baseline': '_baseline'}
         
-        # Merge on step
-        merged_df = pd.merge(
-            baseline_timeline,
-            proactive_timeline,
-            on='step',
-            suffixes=('_baseline', '_proactive')
-        )
+        # Rename baseline columns
+        cols_to_rename = {c: f"baseline_{c}" for c in ['demand', 'capacity', 'machines', 'utilization', 'violation']}
+        merged_df = merged_df.rename(columns=cols_to_rename)
         
-        # Rename columns for clarity
-        merged_df = merged_df.rename(columns={
-            'time_baseline': 'time',
-            'demand_baseline': 'baseline_demand',
-            'capacity_baseline': 'baseline_capacity',
-            'machines_baseline': 'baseline_machines',
-            'utilization_baseline': 'baseline_utilization',
-            'violation_baseline': 'baseline_violation',
-            'demand_proactive': 'proactive_demand',
-            'capacity_proactive': 'proactive_capacity',
-            'machines_proactive': 'proactive_machines',
-            'utilization_proactive': 'proactive_utilization',
-            'violation_proactive': 'proactive_violation'
-        })
+        # Merge others
+        for name, res in results_map.items():
+            if name == 'baseline': continue
+            
+            timeline = res['timeline']
+            cols_to_rename = {c: f"{name}_{c}" for c in ['capacity', 'machines', 'utilization', 'violation', 'demand']}
+            temp_df = timeline.rename(columns=cols_to_rename)
+            
+            # Merge
+            merged_df = pd.merge(
+                merged_df,
+                temp_df[['step'] + list(cols_to_rename.values())],
+                on='step',
+                how='inner',
+                suffixes=('', '')
+            )
         
-        # Select relevant columns
-        merged_df = merged_df[[
-            'step', 'time',
-            'baseline_demand', 'baseline_capacity', 'baseline_machines',
-            'baseline_utilization', 'baseline_violation',
-            'proactive_capacity', 'proactive_machines',
-            'proactive_utilization', 'proactive_violation'
-        ]]
-        
-        # Save merged timeline
+        # Save merged
         merged_csv_path = comparison_dir / "comparison_timeline.csv"
         merged_df.to_csv(merged_csv_path, index=False)
         print(f"   ✓ Merged timeline saved: {merged_csv_path}")
@@ -489,79 +528,69 @@ def run_comparison(args):
         print(f"❌ Error merging timelines: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
-    
-    # ========== Compute Comparison Metrics ==========
-    try:
-        comparison_metrics_dict = compare_metrics(baseline_metrics, proactive_metrics)
-        
-        # Save comparison metrics
-        metrics_json_path = comparison_dir / "comparison_metrics.json"
-        with open(metrics_json_path, 'w') as f:
-            json.dump(comparison_metrics_dict, f, indent=4)
-        print(f"   ✓ Comparison metrics saved: {metrics_json_path}")
-        print()
-        
-    except Exception as e:
-        print(f"❌ Error computing comparison metrics: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # ========== Create Comparison Plots ==========
-    print("📈 Creating comparison visualizations...")
+        return
+
+    # ========== Comparison Metrics & Plots ==========
+    from cloud_autoscale.visualization.plots import (
+        plot_baseline_vs_rl, 
+        plot_rl_vs_proactive, 
+        plot_rl_summary,
+        plot_three_way_comparison,
+        plot_three_way_metrics_table
+    )
     
     try:
         plots_dir = comparison_dir / "plots"
-        create_comparison_plots(
-            baseline_results,
-            proactive_results,
-            merged_df,
-            comparison_metrics_dict,
-            plots_dir
-        )
-        print()
+        plots_dir.mkdir(exist_ok=True)
         
+        # If all three strategies are present, create comprehensive 3-way comparison
+        if 'baseline' in results_map and 'proactive' in results_map and 'rl' in results_map:
+            print("📊 Creating 3-way comparison plots...")
+            plot_three_way_comparison(
+                results_map['baseline'],
+                results_map['proactive'],
+                results_map['rl'],
+                plots_dir / "three_way_comparison.png"
+            )
+            plot_three_way_metrics_table(
+                results_map['baseline'],
+                results_map['proactive'],
+                results_map['rl'],
+                plots_dir / "three_way_metrics.png"
+            )
+        
+        # Individual pairwise comparisons
+        if 'rl' in results_map:
+            # Baseline vs RL
+            plot_baseline_vs_rl(
+                results_map['baseline'],
+                results_map['rl'],
+                plots_dir / "baseline_vs_rl.png"
+            )
+            
+            plot_rl_summary(
+                results_map['rl'],
+                plots_dir / "rl_summary.png"
+            )
+            
+            if 'proactive' in results_map:
+                plot_rl_vs_proactive(
+                    results_map['rl'],
+                    results_map['proactive'],
+                    plots_dir / "rl_vs_proactive.png"
+                )
+
+    except ImportError as e:
+        print(f"⚠️  Visualization functions not ready: {e}")
     except Exception as e:
         print(f"⚠️  Warning: Could not create comparison plots: {e}")
         import traceback
         traceback.print_exc()
-    
-    # ========== Display Summary ==========
-    print("=" * 70)
-    print("📊 COMPARISON SUMMARY")
-    print("=" * 70)
-    print()
-    print(f"SLA Performance:")
-    print(f"  Violation Reduction:     {comparison_metrics_dict['violation_reduction_percent']:>6.1f}%")
-    print(f"  Baseline Violations:     {comparison_metrics_dict['baseline']['violations']:>6d}")
-    print(f"  Proactive Violations:    {comparison_metrics_dict['proactive']['violations']:>6d}")
-    print()
-    print(f"Cost Efficiency:")
-    print(f"  Cost Savings:            {comparison_metrics_dict['cost_savings_percent']:>6.1f}%")
-    print(f"  Baseline Cost:          ${comparison_metrics_dict['baseline']['cost']:>7.2f}")
-    print(f"  Proactive Cost:         ${comparison_metrics_dict['proactive']['cost']:>7.2f}")
-    print()
-    print(f"Resource Utilization:")
-    print(f"  Utilization Gain:        {comparison_metrics_dict['avg_utilization_gain']:>6.1f} pp")
-    print(f"  Baseline Utilization:    {comparison_metrics_dict['baseline']['avg_utilization']*100:>6.1f}%")
-    print(f"  Proactive Utilization:   {comparison_metrics_dict['proactive']['avg_utilization']*100:>6.1f}%")
-    print()
-    print(f"System Stability:")
-    print(f"  Scaling Event Change:    {comparison_metrics_dict['stability_change']:>6d}")
-    print(f"  Baseline Events:         {comparison_metrics_dict['baseline']['scale_events']:>6d}")
-    print(f"  Proactive Events:        {comparison_metrics_dict['proactive']['scale_events']:>6d}")
+
     print()
     print("=" * 70)
     print("✅ COMPARISON COMPLETED SUCCESSFULLY")
     print("=" * 70)
-    print()
-    print(f"Results saved to: {comparison_dir}")
-    print(f"  - Baseline run: {baseline_run_dir}")
-    print(f"  - Proactive run: {proactive_run_dir}")
-    print(f"  - Merged timeline: {merged_csv_path}")
-    print(f"  - Comparison metrics: {metrics_json_path}")
-    print(f"  - Comparison plots: {plots_dir}/")
     print()
 
 
@@ -607,4 +636,3 @@ def load_demand_data(config: dict) -> pd.DataFrame:
 
 if __name__ == '__main__':
     main()
-
